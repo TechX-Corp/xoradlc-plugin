@@ -1,0 +1,14 @@
+{
+  "name": "techx-dlc",
+  "version": "0.1.0",
+  "description": "Hai scope cho doi phat trien ngan hang: techx-dlc-onboard chay mot lan moi he thong, techx-dlc-feature chay moi BRD da phe duyet.",
+  "author": {
+    "name": "TechX"
+  },
+  "aidlc": {
+    "contributes": {
+      "scopes": "scopes/",
+      "overlays": "contributions/"
+    }
+  }
+}

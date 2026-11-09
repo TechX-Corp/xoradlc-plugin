@@ -42,4 +42,4 @@ dst.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
 PY
 
 echo "Đã cài $NAME vào $KIRO"
-[ -s "$HOME/.xora/env" ] || echo "Chưa có ~/.xora/env: tạo file chứa XORA_BASE_URL, XORA_API_KEY, XORA_USER_ID (xem README, mục Cài cho Kiro)."
+[ -s "$HOME/.xora/env" ] || echo "Chưa có ~/.xora/env: tạo file chứa XORA_API, XORA_BASE_URL, XORA_AGENT, XORA_API_KEY (xem INSTALL-KIRO.md)."

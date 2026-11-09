@@ -23,4 +23,4 @@ BA làm rõ yêu cầu, viết BRD, user story Gherkin, sơ đồ luồng nghi�
 
 ## MCP server `xora-ba`
 
-Chạy cục bộ (stdio, Python 3.9+, không cần thư viện ngoài) từ `~/.agent-plugins/xora-ba/mcp/xora_mcp.py`, đọc `XORA_BASE_URL`, `XORA_API_KEY`, `XORA_USER_ID`, `XORA_AGENT` từ `~/.xora/env`. Không bao giờ in hay ghi API key ra output.
+Chạy cục bộ (stdio, Python 3.9+, không cần thư viện ngoài) từ `~/.agent-plugins/xora-ba/mcp/xora_mcp.py`, đọc kết nối từ `~/.xora/env` (xem `INSTALL-KIRO.md`). Không bao giờ in hay ghi API key ra output.

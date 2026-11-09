@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "xora-ba": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "[ -f \"$HOME/.xora/env\" ] && . \"$HOME/.xora/env\"; exec python3 \"$HOME/.agent-plugins/xora-ba/mcp/xora_mcp.py\""
+      ],
+      "env": {
+        "XORA_ROLE": "ba"
+      },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

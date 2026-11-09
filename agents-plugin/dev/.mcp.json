@@ -10,7 +10,8 @@
         "XORA_BASE_URL": "${XORA_BASE_URL}",
         "XORA_API_KEY": "${XORA_API_KEY}",
         "XORA_USER_ID": "${XORA_USER_ID}",
-        "XORA_AGENT": "${XORA_AGENT:-developer}"
+        "XORA_AGENT": "${XORA_AGENT:-developer}",
+        "XORA_API": "${XORA_API:-invoke}"
       }
     }
   }

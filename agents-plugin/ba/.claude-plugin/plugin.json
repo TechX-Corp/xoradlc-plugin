@@ -1,7 +1,7 @@
 {
   "name": "xora-ba",
   "version": "0.1.0",
-  "description": "BA làm rõ yêu cầu và viết BRD.",
+  "description": "BA làm rõ yêu cầu, viết BRD, user story Gherkin, sơ đồ luồng nghiệp vụ; lưu tài liệu vào KB qua AAP.",
   "author": {
     "name": "TechX Corp"
   }

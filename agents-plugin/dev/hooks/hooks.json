@@ -5,7 +5,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/AGENTS.md\""
+            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/AGENTS.md\" \"${CLAUDE_PLUGIN_ROOT}/steering/changeset-documents.md\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/sensor/convention_sensor.py\" --hook claude",
+            "timeout": 30
           }
         ]
       }

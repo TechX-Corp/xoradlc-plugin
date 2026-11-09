@@ -9,7 +9,7 @@
       "name": "xora-ba",
       "source": "./ba",
       "version": "0.1.0",
-      "description": "BA làm rõ yêu cầu và viết BRD."
+      "description": "BA làm rõ yêu cầu, viết BRD, user story Gherkin, sơ đồ luồng nghiệp vụ; lưu tài liệu vào KB qua AAP."
     },
     {
       "name": "xora-techlead",
@@ -21,7 +21,7 @@
       "name": "xora-dev",
       "source": "./dev",
       "version": "0.1.0",
-      "description": "Developer hiện thực theo plan và lập hồ sơ changeset."
+      "description": "Developer hiện thực theo thiết kế đã duyệt, lập hồ sơ changeset; sensor kiểm convention khi sinh code."
     },
     {
       "name": "xora-qa",

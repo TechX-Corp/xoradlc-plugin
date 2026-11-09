@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "xora-dev": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp/xora_mcp.py"
+      ],
+      "env": {
+        "XORA_ROLE": "dev",
+        "XORA_BASE_URL": "${XORA_BASE_URL}",
+        "XORA_API_KEY": "${XORA_API_KEY}",
+        "XORA_USER_ID": "${XORA_USER_ID}",
+        "XORA_AGENT": "${XORA_AGENT:-developer}"
+      }
+    }
+  }
+}

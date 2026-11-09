@@ -1,0 +1,8 @@
+{
+  "name": "xora-qa",
+  "version": "0.1.0",
+  "description": "QA lập test plan, test case và ghi kết quả.",
+  "author": {
+    "name": "TechX Corp"
+  }
+}

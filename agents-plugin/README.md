@@ -22,16 +22,22 @@ export XORA_USER_ID=<email công việc>
 /plugin install xora-dev@xora-role-plugins
 ```
 
+Xora hiện tại chưa có host công khai cho API `/invoke`; dùng API `runs` theo `agent-connection/xora.config.json`: `XORA_API=runs`, `XORA_BASE_URL=https://<host>/v1`, `XORA_AGENT=<agent id>`, `XORA_API_KEY=xap_...` (không cần `XORA_USER_ID`).
+
 Kiểm tra kết nối: `python3 mcp/xora_mcp.py --check "hello"`.
+
+## Cài cho Kiro
+
+Xem [INSTALL-KIRO.md](INSTALL-KIRO.md). Tóm tắt: lưu kết nối AAP vào `~/.xora/env`, rồi `sh agents-plugin/install-kiro.sh <vai> <repo dự án>`.
 
 ## Vai BA và Dev
 
 | Plugin | Skill | Thêm |
 |---|---|---|
 | `xora-ba` | `clarify-requirements`, `write-brd` (+ `references/brd-standard.md`), `write-user-stories`, `draw-process-flow`, `upload-kb` | `steering/brd-documents.md`: quy ước file BRD, nạp lúc mở phiên cùng `AGENTS.md` |
-| `xora-dev` | `implement`, `changeset` (+ `references/changeset-standard.md`), `upload-kb` | `steering/changeset-documents.md`; **sensor convention** |
+| `xora-dev` | `implement`, `changeset` (+ `references/changeset-standard.md`), `upload-tech-doc` | `steering/changeset-documents.md`; **sensor convention** |
 
-Lưu tài liệu vào KB / S3 (skill `upload-kb`) đi qua `xora_ask`: agent rà dữ liệu nhạy cảm và trạng thái duyệt, hỏi người dùng xác nhận, rồi mới gửi yêu cầu lưu cho AAP.
+Lưu tài liệu vào KB / S3 (skill `upload-kb` của BA, `upload-tech-doc` của Dev) đi qua `xora_ask`: agent rà dữ liệu nhạy cảm và trạng thái duyệt, hỏi người dùng xác nhận, rồi mới gửi yêu cầu lưu cho AAP.
 
 ### Sensor convention (`xora-dev`)
 
@@ -44,12 +50,13 @@ Kiểm code theo `convention.md` ở gốc repo dự án mỗi khi agent ghi / s
 ## Kiểm tra
 
 `python3 agents-plugin/test_roles.py` (repo chưa có CI, chạy tay trước khi mở PR): kiểm tra manifest, symlink, frontmatter
-của skill, file mà hook trỏ tới, giao thức MCP và sensor convention của `dev`, không gọi mạng.
+của skill, file mà hook trỏ tới, giao thức MCP, sensor convention của `dev`, và bản Kiro (cài thử vào workspace tạm, bắt tay MCP bằng lệnh Kiro sẽ chạy), không gọi mạng.
 
 ## Còn để ngỏ
 
 - `ba` và `dev` đã có nội dung đầy đủ. `techlead`, `qa`, `reviewer`, `delivery` vẫn là khung có `TODO(BA)`; thay khi BA gửi tài liệu.
-- `xora_get_run` chưa nối: chờ AAP công bố API run.
+- `xora_get_run` chạy với `XORA_API=runs`; với `/invoke` vẫn chờ AAP công bố API run.
 - Danh tính đang tự khai (`XORA_USER_ID` + API key chung); chuyển sang token SSO của người dùng khi AAP có luồng xác thực.
 - Tên trường `role` gửi sang AAP chưa được AAP xác nhận.
-- Chưa có bản Kiro (steering + `.kiro/settings/mcp.json`) và chưa đóng gói vào tarball release.
+- Bản Kiro đã có (`install-kiro.sh`, `POWER.md`, `mcp.json`); định dạng file hook Kiro chưa được thử trong giao diện Kiro.
+- Chưa đóng gói vào tarball release.

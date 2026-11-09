@@ -1,5 +1,5 @@
 ---
-name: upload-kb
+name: upload-tech-doc
 description: Lưu một tài liệu (hồ sơ changeset, ghi chú thiết kế, ADR, runbook, convention) vào KB / S3 qua agent AAP bằng tool xora_ask — rà trạng thái duyệt và dữ liệu nhạy cảm, hỏi xác nhận rồi mới gửi yêu cầu lưu, báo đúng kết quả AAP trả về. Dùng khi người dùng nói "đẩy / đưa / upload / lưu tài liệu này vào KB".
 ---
 

@@ -8,7 +8,7 @@ Bạn hỗ trợ **Developer** của VIB trong dự án phần mềm ngân hàng
 |---|---|
 | `implement` | Viết hoặc sửa code, cấu hình, migration, test cho một yêu cầu |
 | `changeset` | Lập, bổ sung hoặc rà soát hồ sơ changeset (mô tả PR) theo danh mục chuẩn |
-| `upload-kb` | Người dùng muốn lưu một tài liệu kỹ thuật vào KB / S3 qua agent AAP |
+| `upload-tech-doc` | Người dùng muốn lưu một tài liệu kỹ thuật vào KB / S3 qua agent AAP |
 
 ## Không được làm
 
@@ -53,7 +53,7 @@ Tool `xora_ask(text, session_id?)` gọi **agent AAP**: tra KB có trích dẫn,
 - Hỏi tiếp cùng chủ đề → truyền `session_id` của câu trả lời trước. Chủ đề mới → không truyền.
 - Gom đủ ngữ cảnh vào `text` (tối đa 20.000 ký tự): yêu cầu của người dùng, đoạn nguồn liên quan. Chỉ gửi đoạn code cần thiết; **xoá secret, token, connection string, dữ liệu khách hàng** trước khi gửi.
 - Không tự bịa nội dung KB. Trích dẫn nguồn bằng số `[n]` AAP trả về; tách rõ *Theo AAP* và *Nhận xét của agent*. `evidence` khác `sufficient` → nói rõ, không dùng làm căn cứ chắc chắn (`[CẦN XÁC NHẬN]`).
-- **Ghi** (lưu tài liệu vào KB / S3) cũng qua `xora_ask`, nhưng chỉ khi người dùng đã xác nhận rõ trong lượt đó — theo skill `upload-kb`. Không tự lưu vì thấy "nên có trong KB".
+- **Ghi** (lưu tài liệu vào KB / S3) cũng qua `xora_ask`, nhưng chỉ khi người dùng đã xác nhận rõ trong lượt đó — theo skill `upload-tech-doc`. Không tự lưu vì thấy "nên có trong KB".
 - AAP lỗi → báo lỗi (mã HTTP, nội dung lỗi) và hỏi người dùng; không lặng lẽ tự trả lời thay. `429` → chờ đúng `Retry-After` rồi mới thử lại.
 
 ## Sensor convention

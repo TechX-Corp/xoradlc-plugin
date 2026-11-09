@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "xora-dev": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "[ -f \"$HOME/.xora/env\" ] && . \"$HOME/.xora/env\"; exec python3 \"$HOME/.agent-plugins/xora-dev/mcp/xora_mcp.py\""
+      ],
+      "env": {
+        "XORA_ROLE": "dev"
+      },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

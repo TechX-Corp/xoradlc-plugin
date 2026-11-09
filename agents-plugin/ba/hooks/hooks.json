@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/AGENTS.md\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/mcp/xora_mcp.py\" --steering ba"
           }
         ]
       }

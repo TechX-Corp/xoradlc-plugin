@@ -22,7 +22,6 @@ Không commit file này, không dán key vào `mcp.json`.
 Chạy từ thư mục clone `xoradlc-plugin`, đích là repo dự án mở trong Kiro:
 
 ```bash
-sh agents-plugin/install-kiro.sh ba  ~/code/core-banking
 sh agents-plugin/install-kiro.sh dev ~/code/core-banking
 ```
 
@@ -40,7 +39,7 @@ Mở lại Kiro (hoặc **MCP Servers → Retry**), mở phiên chat mới:
 Kiểm ngoài Kiro:
 
 ```bash
-sh -c '. ~/.xora/env; XORA_ROLE=ba python3 ~/.agent-plugins/xora-ba/mcp/xora_mcp.py --check "hello"'
+sh -c '. ~/.xora/env; XORA_ROLE=dev python3 ~/.agent-plugins/xora-dev/mcp/xora_mcp.py --check "hello"'
 ```
 
 ## Sự cố

@@ -1,8 +1,0 @@
-{
-  "name": "xora-dev",
-  "version": "0.1.0",
-  "description": "Developer hiện thực theo thiết kế đã duyệt, lập hồ sơ changeset; sensor kiểm convention khi sinh code.",
-  "author": {
-    "name": "TechX Corp"
-  }
-}

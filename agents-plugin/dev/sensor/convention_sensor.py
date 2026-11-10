@@ -12,12 +12,16 @@ Kiểu luật:
   filename   tên file phải khớp regex
   max_lines  file không quá "max" dòng
 
+Luật `forbid` chỉ báo trên dòng đã đổi so với HEAD (file mới / ngoài git: mọi dòng), để code cũ
+không làm ngập cảnh báo. Luật cấp file (require, filename, max_lines) vẫn xét cả file.
+
 Bỏ qua có chủ đích: thêm `convention-ignore: <ID> <lý do>` trên chính dòng đó.
 
 Cách chạy:
   python3 convention_sensor.py [file ...]      # không có file → các file đổi trong git (staged + chưa staged + mới)
+  python3 convention_sensor.py --staged        # chỉ phần đã staged (dùng cho git pre-commit)
+  python3 convention_sensor.py --full [file …] # kiểm mọi dòng, kể cả code cũ (rà toàn bộ)
   python3 convention_sensor.py --hook claude   # hook PostToolUse của Claude Code: đọc JSON từ stdin
-  python3 convention_sensor.py --strict ...    # exit 1 nếu có cảnh báo (dùng cho CI sau này)
 Tìm convention.md: biến CONVENTION_FILE, hoặc đi ngược từ thư mục file lên tới gốc repo.
 """
 import fnmatch
@@ -30,6 +34,7 @@ from pathlib import Path
 
 IGNORE = re.compile(r"convention-ignore:\s*([A-Z]+-\d+)")
 RULES_BLOCK = re.compile(r"```json\s*\n(.*?)\n```", re.S)
+HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 
 
 def git_root(start):
@@ -62,7 +67,7 @@ def load_rules(conv_path):
         try:
             cfg = json.loads(b)
         except json.JSONDecodeError as e:
-            raise SystemExit(f"convention.md: khối luật JSON sai cú pháp ({e}).")
+            raise ValueError(f"convention.md: khối luật JSON sai cú pháp ({e})")
         if isinstance(cfg, dict) and "rules" in cfg:
             for r in cfg["rules"]:
                 if r.get("pattern"):
@@ -78,12 +83,24 @@ def match(path, patterns):
     return False
 
 
-def check_file(path, rel, cfg):
+def read_text(path, staged):
+    """Nội dung file; --staged thì đọc bản trong index để khớp số dòng của `git diff --cached`."""
+    try:
+        if staged and (root := git_root(path.parent)):
+            res = subprocess.run(["git", "-C", str(root), "show", f":{path.relative_to(root.resolve()).as_posix()}"],
+                                 capture_output=True)
+            if res.returncode == 0:
+                return res.stdout.decode("utf-8")
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def check_file(path, rel, cfg, lines_changed=None, staged=False):
     if match(rel, cfg.get("exclude")):
         return []
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    text = read_text(Path(path), staged)
+    if text is None:
         return []
     lines = text.splitlines()
     out = []
@@ -93,7 +110,8 @@ def check_file(path, rel, cfg):
         kind, hit = r.get("type"), []
         if kind == "forbid":
             hit = [i for i, ln in enumerate(lines, 1)
-                   if r["_re"].search(ln) and r["id"] not in IGNORE.findall(ln)]
+                   if (lines_changed is None or i in lines_changed)
+                   and r["_re"].search(ln) and r["id"] not in IGNORE.findall(ln)]
         elif kind == "require" and not r["_re"].search(text):
             hit = [0]
         elif kind == "filename" and not r["_re"].search(Path(rel).name):
@@ -104,16 +122,38 @@ def check_file(path, rel, cfg):
     return out
 
 
-def changed_files(root):
+def git(root, *args):
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+
+def changed_lines(path, staged):
+    """Số dòng đã đổi (set), hoặc None = xét mọi dòng (ngoài git, file mới, repo chưa có commit)."""
+    root = git_root(path.parent)
+    if not root or git(root, "ls-files", "--error-unmatch", str(path)).returncode != 0:
+        return None
+    base = ["--cached"] if staged else ["HEAD"]
+    res = git(root, "diff", "-U0", "--no-color", "--no-ext-diff", *base, "--", str(path))
+    if res.returncode != 0:  # chưa có HEAD
+        return None
+    out = set()
+    for start, count in HUNK.findall(res.stdout):
+        n = int(count) if count else 1
+        out.update(range(int(start), int(start) + n))
+    return out
+
+
+def changed_files(root, staged=False):
     files = set()
-    for args in (["diff", "--name-only"], ["diff", "--name-only", "--cached"],
-                 ["ls-files", "--others", "--exclude-standard"]):
+    cmds = ([["diff", "--name-only", "--cached", "--diff-filter=d"]] if staged else
+            [["diff", "--name-only"], ["diff", "--name-only", "--cached"],
+             ["ls-files", "--others", "--exclude-standard"]])
+    for args in cmds:
         res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
         files |= {f for f in res.stdout.splitlines() if f}
     return [root / f for f in sorted(files) if (root / f).is_file()]
 
 
-def run(paths):
+def run(paths, full=False, staged=False):
     """Trả (convention_path, version, danh sách cảnh báo)."""
     if not paths:
         return None, None, []
@@ -129,7 +169,7 @@ def run(paths):
             rel = p.relative_to(base).as_posix()
         except ValueError:
             rel = p.name
-        warns += check_file(p, rel, cfg)
+        warns += check_file(p, rel, cfg, None if full else changed_lines(p, staged), staged)
     return conv, cfg.get("version"), warns
 
 
@@ -143,8 +183,9 @@ def report(conv, version, warns, max_items=30):
         rows.append(f"- {where} [{r['id']}] {r.get('message', '')}{fix}")
     if len(warns) > max_items:
         rows.append(f"- … và {len(warns) - max_items} cảnh báo khác")
-    tail = ("Cảnh báo, không chặn. Sửa theo convention, hoặc nếu cố ý giữ: thêm `convention-ignore: <ID> <lý do>` "
-            "trên dòng đó và ghi vào mục Nợ kỹ thuật của hồ sơ changeset.")
+    tail = ("Chỉ cảnh báo, không chặn. Agent sửa vi phạm trong phần code vừa sinh / sửa; vi phạm ở code cũ thì liệt kê "
+            "cho Developer. Cố ý giữ: Developer đồng ý thì thêm `convention-ignore: <ID> <lý do>` trên dòng đó "
+            "và ghi vào mục Nợ kỹ thuật của hồ sơ changeset.")
     return "\n".join([head, *rows, tail])
 
 
@@ -173,8 +214,8 @@ def hook_claude():
 def main(argv):
     if argv[:2] == ["--hook", "claude"]:
         return hook_claude()
-    strict = "--strict" in argv
-    args = [a for a in argv if a != "--strict"]
+    full, staged = ("--full" in argv), ("--staged" in argv)
+    args = [a for a in argv if a not in ("--full", "--staged")]
     if args:
         paths = [Path(a) for a in args]
     else:
@@ -182,18 +223,27 @@ def main(argv):
         if not root:
             print("Không phải git repo và không có file nào được chỉ định.", file=sys.stderr)
             return 0
-        paths = changed_files(root)
-    conv, version, warns = run(paths)
+        paths = changed_files(root, staged)
+    conv, version, warns = run(paths, full, staged)
     if paths and not conv:
         print("Chưa có convention.md — copy convention.sample.md ở gốc plugin xora-dev về gốc repo thành convention.md, rồi sửa theo dự án.", file=sys.stderr)
         return 0
     if warns:
         print(report(conv, version, warns, max_items=200))
-        return 1 if strict else 0
+        return 0
     if conv:
         print(f"✓ Convention: {len(paths)} file đạt ({conv.name}" + (f" v{version}" if version else "") + ").")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    # Chỉ cảnh báo, không chặn: mọi lỗi (convention.md sai, regex sai, …) thành một cảnh báo, luôn exit 0.
+    try:
+        main(sys.argv[1:])
+    except Exception as e:
+        msg = f"⚠ Sensor convention lỗi, bỏ qua lần kiểm này: {e}"
+        if sys.argv[1:3] == ["--hook", "claude"]:
+            print(json.dumps({"systemMessage": msg}, ensure_ascii=False))
+        else:
+            print(msg, file=sys.stderr)
+    sys.exit(0)

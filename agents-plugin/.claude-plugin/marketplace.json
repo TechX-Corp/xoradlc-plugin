@@ -3,43 +3,13 @@
   "owner": {
     "name": "TechX Corp"
   },
-  "description": "Role plugins (BA, Tech lead, Dev, QA, Reviewer, Delivery) that connect Claude Code to the AAP agent.",
+  "description": "Plugin cho vai Developer, nối Claude Code với agent AAP. Các vai khác đã chuyển vào archived/.",
   "plugins": [
-    {
-      "name": "xora-ba",
-      "source": "./ba",
-      "version": "0.1.0",
-      "description": "BA làm rõ yêu cầu, viết BRD, user story Gherkin, sơ đồ luồng nghiệp vụ; lưu tài liệu vào KB qua AAP."
-    },
-    {
-      "name": "xora-techlead",
-      "source": "./techlead",
-      "version": "0.1.0",
-      "description": "Tech lead thiết kế giải pháp và lập plan."
-    },
     {
       "name": "xora-dev",
       "source": "./dev",
       "version": "0.1.0",
       "description": "Developer hiện thực theo thiết kế đã duyệt, lập hồ sơ changeset; sensor kiểm convention khi sinh code."
-    },
-    {
-      "name": "xora-qa",
-      "source": "./qa",
-      "version": "0.1.0",
-      "description": "QA lập test plan, test case và ghi kết quả."
-    },
-    {
-      "name": "xora-reviewer",
-      "source": "./reviewer",
-      "version": "0.1.0",
-      "description": "Reviewer gom bằng chứng và ra quyết định."
-    },
-    {
-      "name": "xora-delivery",
-      "source": "./delivery",
-      "version": "0.1.0",
-      "description": "Delivery lập hồ sơ bàn giao DEV / UAT."
     }
   ]
 }

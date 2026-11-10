@@ -2,14 +2,14 @@
 # Cài một plugin theo vai vào Kiro: skills + steering + hook + MCP server.
 #   sh install-kiro.sh <vai> <đường-dẫn-workspace>   # ví dụ: sh install-kiro.sh dev ~/code/core-banking
 #   sh install-kiro.sh <vai> --global                # mọi workspace (~/.kiro); hook của Kiro chỉ có ở workspace
-# <vai>: ba | techlead | dev | qa | reviewer | delivery. Chạy lại để cập nhật.
+# <vai>: dev (các vai khác ở archived/). Chạy lại để cập nhật.
 set -eu
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 ROLE="${1:-}"; TARGET="${2:-}"
 SRC="$ROOT/$ROLE"
 if [ -z "$ROLE" ] || [ -z "$TARGET" ] || [ ! -f "$SRC/mcp.json" ]; then
-  echo "Dùng: sh install-kiro.sh <ba|techlead|dev|qa|reviewer|delivery> <workspace|--global>" >&2; exit 1
+  echo "Dùng: sh install-kiro.sh <dev> <workspace|--global>" >&2; exit 1
 fi
 NAME="xora-$ROLE"
 case "$TARGET" in

@@ -3,7 +3,7 @@ import json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-ROLES = ["ba", "techlead", "dev", "qa", "reviewer", "delivery"]
+ROLES = ["dev"]  # các vai khác ở archived/, không kiểm
 
 
 def rpc(*msgs, role="dev"):
@@ -18,7 +18,8 @@ def main():
     assert sorted(p["name"] for p in market["plugins"]) == sorted(f"xora-{r}" for r in ROLES)
     for role in ROLES:
         d = ROOT / role
-        assert json.loads((d / ".claude-plugin" / "plugin.json").read_text())["name"] == f"xora-{role}"
+        manifest = d / ".claude-plugin" / "plugin.json"  # tuỳ chọn: thiếu thì Claude Code lấy tên từ marketplace
+        assert not manifest.is_file() or json.loads(manifest.read_text())["name"] == f"xora-{role}"
         server = json.loads((d / ".mcp.json").read_text())["mcpServers"][f"xora-{role}"]
         assert server["env"]["XORA_ROLE"] == role
         assert (d / "mcp" / "xora_mcp.py").resolve() == ROOT / "mcp" / "xora_mcp.py", f"{role}: broken symlink"
@@ -40,9 +41,9 @@ def main():
         {"jsonrpc": "2.0", "id": 4, "method": "nope"},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},  # no reply expected
         {"jsonrpc": "2.0", "id": 5, "method": "ping"},
-        role="qa",
+        role="dev",
     )
-    assert init["result"]["serverInfo"]["name"] == "xora-qa"
+    assert init["result"]["serverInfo"]["name"] == "xora-dev"
     assert [t["name"] for t in tools["result"]["tools"]] == ["xora_ask", "xora_get_run"]
     assert bad_tool["result"]["isError"] and "Missing XORA_BASE_URL" in bad_tool["result"]["content"][0]["text"]
     assert unknown["error"]["code"] == -32601
@@ -68,6 +69,27 @@ def check_sensor():
         ctx = json.loads(hook())["hookSpecificOutput"]["additionalContext"]
         assert "[LOG-001]" in ctx and "SEC-001" not in ctx.split("\n- ", 1)[1], ctx
 
+        # Đã commit: forbid chỉ báo trên dòng đổi; --full báo cả code cũ; --staged chỉ xét phần đã staged.
+        g = lambda *a: subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                                      check=True, capture_output=True)
+        g("add", "."); g("commit", "-qm", "init")
+        cli = lambda *a: subprocess.run([sys.executable, str(sensor), *a], cwd=repo, capture_output=True, text=True).stdout
+        bad.write_text(bad.read_text()[:-2] + "} // end\n")  # chỉ sửa dòng 3
+        assert hook() == "", "chỉ sửa dòng khác (dòng 1 đã có vi phạm cũ) thì không báo code cũ"
+        assert "[LOG-001]" in cli("--full", str(bad))
+        bad.write_text(bad.read_text() + 'class B { void b(){ System.out.println("y"); } }\n')
+        assert "A.java:4 [LOG-001]" in cli(), "dòng mới thêm phải bị báo"
+        assert "[LOG-001]" not in cli("--staged"), "chưa staged thì --staged không báo"
+        g("add", "A.java")
+        bad.write_text("\n\n" + bad.read_text())  # sửa thêm sau khi staged: số dòng working tree lệch với index
+        assert "A.java:4 [LOG-001]" in cli("--staged"), "--staged phải đọc bản trong index"
+
+        # Chỉ cảnh báo, không chặn: có vi phạm hay convention.md hỏng thì vẫn exit 0.
+        code = lambda *a: subprocess.run([sys.executable, str(sensor), *a], cwd=repo, capture_output=True).returncode
+        assert code() == 0, "có cảnh báo vẫn phải exit 0"
+        (repo / "convention.md").write_text("```json\n{\"rules\": [\n```\n")
+        assert code() == 0 and "lỗi" in json.loads(hook())["systemMessage"], "convention.md hỏng vẫn không chặn"
+
 
 
 def check_kiro():
@@ -88,15 +110,15 @@ def check_kiro():
         home, ws = Path(tmp) / "home", Path(tmp) / "ws"
         ws.mkdir(parents=True); home.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith("XORA_")} | {"HOME": str(home)}
-        for role in ("ba", "dev"):
+        for role in ("dev",):
             subprocess.run(["sh", str(ROOT / "install-kiro.sh"), role, str(ws)], env=env, check=True, capture_output=True)
         kiro = ws / ".kiro"
         assert (kiro / "steering" / "xora-dev.md").is_file() and (kiro / "hooks" / "convention-sensor.kiro.hook").is_file()
-        assert (kiro / "skills" / "upload-kb").is_dir() and (kiro / "skills" / "upload-tech-doc").is_dir()
+        assert (kiro / "skills" / "upload-tech-doc").is_dir()
         installed = home / ".agent-plugins" / "xora-dev" / "mcp" / "xora_mcp.py"
         assert installed.is_file() and not installed.is_symlink(), "phải chép file thật, không chép symlink"
         servers = json.loads((kiro / "settings" / "mcp.json").read_text())["mcpServers"]
-        assert set(servers) == {"xora-ba", "xora-dev"}
+        assert set(servers) == {"xora-dev"}
         srv = servers["xora-dev"]
         out = subprocess.run([srv["command"], *srv["args"]], env=env | srv["env"], capture_output=True, text=True, check=True,
                              input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n").stdout
@@ -130,11 +152,11 @@ def check_runs():
     try:
         env = {k: v for k, v in os.environ.items() if not k.startswith("XORA_")} | {
             "XORA_API": "runs", "XORA_BASE_URL": f"http://127.0.0.1:{srv.server_port}/v1",
-            "XORA_API_KEY": "xap_test", "XORA_AGENT": "agent_x", "XORA_ROLE": "ba"}
+            "XORA_API_KEY": "xap_test", "XORA_AGENT": "agent_x", "XORA_ROLE": "dev"}
         out = subprocess.run([sys.executable, str(ROOT / "mcp" / "xora_mcp.py"), "--check", "Có BRD nào?"],
                              env=env, capture_output=True, text=True, timeout=60)
         assert out.returncode == 0 and "Không có BRD." in out.stdout and "arun_1" in out.stdout, out.stdout + out.stderr
-        assert seen["body"] == {"input": {"question": "[Vai người hỏi: ba]\nCó BRD nào?"}} and seen["idem"], seen
+        assert seen["body"] == {"input": {"question": "[Vai người hỏi: dev]\nCó BRD nào?"}} and seen["idem"], seen
     finally:
         srv.shutdown()
 

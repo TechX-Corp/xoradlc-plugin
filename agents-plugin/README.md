@@ -1,12 +1,8 @@
 # Plugin theo vai (Claude Code / Kiro ↔ agent AAP)
 
-Sáu plugin theo vai: `xora-ba`, `xora-techlead`, `xora-dev`, `xora-qa`, `xora-reviewer`, `xora-delivery`. Mỗi plugin gồm `AGENTS.md` (quy tắc của vai), skill của vai và MCP server `xora-<vai>`. Cả 6 server chạy chung `mcp/xora_mcp.py`, chỉ khác `XORA_ROLE`, và gọi về **một agent AAP**. Agent này lo đọc / ghi KB, S3, kiểm quyền và ghi audit.
+Hiện chỉ dùng plugin `xora-dev` (vai Developer): skill `implement`, `changeset`, `upload-tech-doc`, sensor convention, và MCP server `xora-dev` chạy `mcp/xora_mcp.py` để gọi về **agent AAP**. AAP lo đọc / ghi KB, S3, kiểm quyền và ghi audit. Chi tiết: [dev/README.md](dev/README.md).
 
-| Vai | Skill |
-|---|---|
-| `ba` | `clarify-requirements`, `write-brd`, `write-user-stories`, `draw-process-flow`, `upload-kb` |
-| `dev` | `implement`, `changeset`, `upload-tech-doc` + sensor convention |
-| `techlead`, `qa`, `reviewer`, `delivery` | Khung, còn `TODO(BA)` |
+Các vai khác (`ba`, `techlead`, `qa`, `reviewer`, `delivery`) đã chuyển vào [archived/](archived/), không có trong marketplace và không được kiểm. Muốn dùng lại: chuyển thư mục về cạnh `dev/`, sửa symlink `mcp/xora_mcp.py` thành `../../mcp/xora_mcp.py`, thêm vào `marketplace.json` và `ROLES` trong `test_roles.py`.
 
 ## Kết nối AAP
 
@@ -30,14 +26,16 @@ Kiểm tra: `python3 mcp/xora_mcp.py --check "hello"`.
 
 ## Cài cho Kiro
 
-`sh agents-plugin/install-kiro.sh <vai> <repo dự án>`. Chi tiết: [INSTALL-KIRO.md](INSTALL-KIRO.md).
+`sh agents-plugin/install-kiro.sh dev <repo dự án>`. Chi tiết: [INSTALL-KIRO.md](INSTALL-KIRO.md).
 
 ## Sensor convention (`dev`)
 
 Sau mỗi lần agent ghi / sửa code, sensor kiểm theo `convention.md` ở gốc repo và **chỉ cảnh báo**.
 
 - Tạo `convention.md`: copy `dev/convention.sample.md` về gốc repo, sửa cho khớp dự án.
-- Chạy tay / CI: `python3 dev/sensor/convention_sensor.py [file …] [--strict]`.
+- Luật `forbid` chỉ báo trên dòng đã đổi so với HEAD; `--full` để rà cả code cũ.
+- Chạy tay / CI: `python3 dev/sensor/convention_sensor.py [file …] [--staged] [--full]` (`--staged` cho git pre-commit).
+- Plugin dev làm được gì: [dev/README.md](dev/README.md).
 - Bỏ qua một dòng: `convention-ignore: <ID> <lý do>`.
 
 ## Kiểm tra trước khi mở PR

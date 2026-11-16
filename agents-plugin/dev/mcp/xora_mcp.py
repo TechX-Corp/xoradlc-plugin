@@ -1,1 +1,0 @@
-../../mcp/xora_mcp.py

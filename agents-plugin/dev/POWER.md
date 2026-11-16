@@ -21,4 +21,4 @@ Developer hiện thực theo thiết kế đã duyệt, lập hồ sơ changeset
 
 ## MCP server `xora-dev`
 
-Chạy cục bộ (stdio, Python 3.9+, không cần thư viện ngoài) từ `~/.agent-plugins/xora-dev/mcp/xora_mcp.py`, đọc kết nối từ `~/.xora/env` (xem `INSTALL-KIRO.md`). Không bao giờ in hay ghi API key ra output.
+MCP từ xa của Xora DLC (`https://xoradlc-platform-api.techxcorp.com/mcp/user`), đăng nhập bằng OAuth: lần đầu Kiro mở trình duyệt tới trang đăng nhập Xora DLC (SSO hoặc tài khoản local). Một tool `xora_ask`: Xora DLC chuyển câu hỏi cho agent AAP của vai người dùng, AAP tự gọi các function của Xora DLC. Không có key nào trên máy.

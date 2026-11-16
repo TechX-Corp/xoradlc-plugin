@@ -19,7 +19,7 @@ case "$TARGET" in
      KIRO="$WS/.kiro" ;;
 esac
 
-# 1. Bản cài cố định cho MCP server / sensor (mcp.json trỏ tới đây). -L: chép file thật thay cho symlink mcp/xora_mcp.py
+# 1. Bản cài cố định cho sensor (hook trỏ tới đây). -L: chép file thật thay cho symlink
 DEST="$HOME/.agent-plugins/$NAME"
 rm -rf "$DEST" && mkdir -p "$DEST" && cp -RL "$SRC/." "$DEST/"
 
@@ -32,14 +32,18 @@ if [ -d "$SRC/kiro-hooks" ] && [ "$TARGET" != "--global" ]; then
   mkdir -p "$KIRO/hooks" && cp "$SRC/kiro-hooks/"*.kiro.hook "$KIRO/hooks/"
 fi
 
-# 3. Gộp MCP server của vai vào mcp.json, giữ nguyên server khác
-python3 - "$SRC/mcp.json" "$KIRO/settings/mcp.json" <<'PY'
-import json, sys, pathlib
+# 3. Gộp MCP server của vai vào mcp.json, giữ nguyên server khác. XORA_URL: backend khác (vd. local).
+XORA_URL="${XORA_URL:-}" python3 - "$SRC/mcp.json" "$KIRO/settings/mcp.json" <<'PY'
+import json, os, sys, pathlib
 src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 cfg = json.loads(dst.read_text()) if dst.exists() and dst.read_text().strip() else {}
-cfg.setdefault("mcpServers", {}).update(json.loads(src.read_text())["mcpServers"])
+servers = json.loads(src.read_text())["mcpServers"]
+base = os.environ["XORA_URL"].rstrip("/")
+for s in servers.values():
+    if base and "url" in s:
+        s["url"] = base + "/mcp/user"
+cfg.setdefault("mcpServers", {}).update(servers)
 dst.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
 PY
 
-echo "Đã cài $NAME vào $KIRO"
-[ -s "$HOME/.xora/env" ] || echo "Chưa có ~/.xora/env: tạo file chứa XORA_API, XORA_BASE_URL, XORA_AGENT, XORA_API_KEY (xem INSTALL-KIRO.md)."
+echo "Đã cài $NAME vào $KIRO. Mở phiên Kiro mới rồi hỏi; lần đầu Kiro mở trình duyệt để đăng nhập Xora DLC."

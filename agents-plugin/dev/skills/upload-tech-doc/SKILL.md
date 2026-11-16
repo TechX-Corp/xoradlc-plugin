@@ -7,7 +7,7 @@ description: Lưu một tài liệu (hồ sơ changeset, ghi chú thiết kế, 
 
 KB là dữ liệu dùng chung của tổ chức: tài liệu đã vào thì agent và người khác sẽ dùng làm căn cứ. **Không bao giờ gửi yêu cầu lưu khi người dùng chưa xác nhận trong lượt này.**
 
-Ghi đi qua cùng tool `xora_ask` của MCP server `xora-dev`: bạn gửi toàn văn tài liệu kèm yêu cầu lưu rõ ràng, **agent AAP** thực hiện ghi, kiểm quyền theo người dùng và vai, chỉ cho artifact đã phê duyệt lên S3, và ghi audit.
+Ghi đi qua cùng tool `xora_ask` của MCP server `xora-dev`: bạn gửi toàn văn tài liệu kèm yêu cầu lưu rõ ràng, **agent AAP** thực hiện ghi, kiểm quyền theo người dùng và vai, chỉ cho artifact đã phê duyệt lên S3, và ghi audit. Qua Xora DLC, `text` tối đa 3.800 ký tự.
 
 ## Bước 1 — Chuẩn bị
 
@@ -22,7 +22,7 @@ Ghi đi qua cùng tool `xora_ask` của MCP server `xora-dev`: bạn gửi toàn
 | `status` khác `approved` (draft, awaiting_review) hoặc không có frontmatter | Cảnh báo: AAP chỉ đưa artifact đã phê duyệt lên S3, và tài liệu chưa duyệt trong KB sẽ thành căn cứ cho người khác. Chỉ gửi khi người dùng xác nhận rõ là vẫn lưu bản chưa duyệt |
 | Secret, token, API key, mật khẩu, connection string, private key, URL / IP nội bộ nhạy cảm, dữ liệu thật của khách hàng trong ví dụ hay log | **Dừng.** Chỉ ra vị trí, đề nghị xoá hoặc thay bằng giá trị giả. Không gửi khi chưa xử lý |
 | Còn `[CẦN XÁC NHẬN]`, `[GIẢ ĐỊNH]`, hoặc mục *Giới hạn đã biết* / kết quả test ghi *chưa chạy* | Nêu số lượng và mục; người dùng quyết có lưu không |
-| Dài hơn ~18.000 ký tự (giới hạn `text` của `xora_ask` là 20.000, chừa chỗ cho yêu cầu) | Đề xuất tách theo mục lớn, lưu từng phần với tên `<tên> — phần i/n` |
+| Dài hơn ~3.200 ký tự (giới hạn `text` của `xora_ask` qua Xora DLC là 3.800, chừa chỗ cho yêu cầu) | Đề xuất tách theo mục lớn, lưu từng phần với tên `<tên> — phần i/n` |
 
 ## Bước 3 — Xác nhận
 

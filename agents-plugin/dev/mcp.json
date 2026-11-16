@@ -1,13 +1,9 @@
 {
   "mcpServers": {
     "xora-dev": {
-      "command": "sh",
-      "args": [
-        "-c",
-        "[ -f \"$HOME/.xora/env\" ] && . \"$HOME/.xora/env\"; exec python3 \"$HOME/.agent-plugins/xora-dev/mcp/xora_mcp.py\""
-      ],
-      "env": {
-        "XORA_ROLE": "dev"
+      "url": "https://xoradlc-platform-api.techxcorp.com/mcp/user",
+      "oauth": {
+        "clientId": "xora-plugin"
       },
       "disabled": false,
       "autoApprove": []

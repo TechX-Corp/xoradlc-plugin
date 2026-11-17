@@ -42,7 +42,13 @@ EXCLUDE_END = "# xdlc:end"
 HOME = Path.home()
 XDLC = HOME / ".xdlc"
 BUNDLE = XDLC / "plugin"  # bản sao repo plugin; Claude Code nạp marketplace tại chỗ từ đây
-BIN = Path(os.environ.get("XDLC_BIN_DIR") or HOME / ".local" / "bin") / "xdlc"
+WINDOWS = os.name == "nt"
+if WINDOWS:  # install.ps1: xdlc.py + xdlc.cmd trong %LOCALAPPDATA%\Programs\xdlc
+    BIN = Path(os.environ.get("XDLC_BIN_DIR") or Path(os.environ.get("LOCALAPPDATA") or HOME) / "Programs" / "xdlc") / "xdlc.py"
+else:
+    BIN = Path(os.environ.get("XDLC_BIN_DIR") or HOME / ".local" / "bin") / "xdlc"
+INSTALL_CMD = ('powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/' + REPO + '/main/install.ps1 | iex"'
+               if WINDOWS else "curl -fsSL https://raw.githubusercontent.com/" + REPO + "/main/install.sh | sh")
 
 HELP = """xdlc {v}: Xora DLC cho Claude Code và Kiro CLI
 
@@ -123,7 +129,7 @@ def short(p):
 
 def load_json(path, default):
     try:
-        return json.loads(Path(path).read_text())
+        return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return default
 
@@ -132,7 +138,7 @@ def save_json(path, data, private=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if private:
         os.chmod(tmp, 0o600)
         os.chmod(path.parent, 0o700)
@@ -154,33 +160,77 @@ def confirm(prompt):
     return ask(prompt + " [y/N] ").lower() in ("y", "yes", "c", "co", "có")
 
 
+def _enable_vt():
+    """Windows: bật mã điều khiển ANSI cho console (Windows Terminal đã bật sẵn; conhost cũ có thể không)."""
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        h, mode = k.GetStdHandle(-11), ctypes.c_uint32()
+        return bool(k.GetConsoleMode(h, ctypes.byref(mode)) and k.SetConsoleMode(h, mode.value | 0x0004))
+    except (AttributeError, OSError):
+        return False
+
+
 def arrow_keys():
-    """Menu phím mũi tên khi stdin/stdout là terminal thật trên macOS / Linux; ngoài ra (pipe, CI, Windows,
-    XDLC_PLAIN=1) thì gõ số như cũ."""
-    if os.name != "posix" or os.environ.get("XDLC_PLAIN") or os.environ.get("TERM") == "dumb":
+    """Menu phím mũi tên khi stdin/stdout là terminal thật; ngoài ra (pipe, CI, console không hiểu ANSI,
+    XDLC_PLAIN=1) thì gõ số."""
+    if os.environ.get("XDLC_PLAIN") or os.environ.get("TERM") == "dumb":
+        return False
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return False
     try:
+        if WINDOWS:
+            import msvcrt  # noqa: F401
+            return _enable_vt()
         import termios  # noqa: F401
         import tty  # noqa: F401
     except ImportError:
         return False
-    return sys.stdin.isatty() and sys.stdout.isatty()
+    return True
+
+
+WIN_KEYS = {"H": "up", "P": "down"}
+KEYS = {"\r": "enter", "\n": "enter", " ": "space", "k": "up", "j": "down", "a": "all", "q": "esc",
+        "\x04": "esc", "\x1b": "esc"}
 
 
 def _key(fd):
+    if WINDOWS:
+        import msvcrt
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):  # phím đặc biệt: mũi tên = \xe0 + H/P
+            return WIN_KEYS.get(msvcrt.getwch(), "")
+        if ch == "\x03":
+            raise KeyboardInterrupt
+        return KEYS.get(ch, "")
     b = os.read(fd, 1)
     if b == b"\x1b":
         if not select.select([fd], [], [], 0.05)[0]:
             return "esc"
         return {b"[A": "up", b"[B": "down", b"OA": "up", b"OB": "down"}.get(os.read(fd, 2), "")
-    return {b"\r": "enter", b"\n": "enter", b" ": "space", b"k": "up", b"j": "down",
-            b"a": "all", b"q": "esc", b"\x04": "esc"}.get(b, "")
+    return KEYS.get(b.decode(errors="ignore"), "")
+
+
+class _Raw:
+    """POSIX: đọc từng phím (cbreak); Windows: msvcrt đã đọc từng phím, không cần gì."""
+
+    def __enter__(self):
+        if not WINDOWS:
+            import termios
+            import tty
+            self.fd = sys.stdin.fileno()
+            self.old = termios.tcgetattr(self.fd)
+            tty.setcbreak(self.fd, termios.TCSANOW)  # TCSANOW: không bỏ phím đã gõ sẵn
+        return self
+
+    def __exit__(self, *exc):
+        if not WINDOWS:
+            import termios
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
 
 
 def menu(title, labels, multi=False):
     """↑/↓ di chuyển, Enter chọn; multi: Space đánh dấu, a = tất cả. Esc / q huỷ. → chỉ số đã chọn."""
-    import termios
-    import tty
     fd, n = sys.stdin.fileno(), len(labels)
     cols = shutil.get_terminal_size((80, 24)).columns
     width = cols - 1 if cols >= 40 else 10_000  # không biết độ rộng thì không cắt dòng
@@ -199,10 +249,9 @@ def menu(title, labels, multi=False):
         out.flush()
 
     print(title)
-    old = termios.tcgetattr(fd)
     out.write("\x1b[?25l")
+    raw = _Raw().__enter__()
     try:
-        tty.setcbreak(fd, termios.TCSANOW)  # TCSANOW: không bỏ phím đã gõ sẵn
         draw(first=True)
         while result is None:
             k, hint = _key(fd), None
@@ -226,7 +275,7 @@ def menu(title, labels, multi=False):
             if result is None:
                 draw()
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        raw.__exit__()
         out.write(f"\x1b[{n + 1}A\x1b[J\x1b[?25h")  # xoá menu, hiện lại con trỏ
         out.flush()
     for i in result:
@@ -265,7 +314,9 @@ def pick_many(n, answer):
 
 
 def run(cmd, cwd=None, check=True):
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    exe = shutil.which(cmd[0])  # Windows: claude là claude.cmd, phải gọi bằng đường dẫn đầy đủ
+    cmd = [exe or cmd[0], *cmd[1:]]
+    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if check and r.returncode != 0:
         raise Abort(f"Lệnh lỗi: {' '.join(cmd)}\n{(r.stderr or r.stdout).strip()}")
     return r
@@ -274,6 +325,20 @@ def run(cmd, cwd=None, check=True):
 def xdlc_path():
     """Đường dẫn agent dùng để chạy `xdlc mcp`: bản đã cài, nếu không thì chính file đang chạy."""
     return BIN if BIN.is_file() else Path(os.path.abspath(sys.argv[0]))
+
+
+def xdlc_argv():
+    """Lệnh chạy xdlc cho agent / hook. Windows không chạy thẳng file .py: gọi py -3 (ổn định qua các lần nâng
+    Python), không có thì chính Python đang chạy."""
+    if not WINDOWS:
+        return [str(xdlc_path())]
+    py = shutil.which("py")
+    return ([py, "-3"] if py else [sys.executable]) + [str(xdlc_path())]
+
+
+def shell_cmd(argv):
+    """Một dòng lệnh shell (bash, sh, cmd đều hiểu): mỗi phần trong ngoặc kép, đường dẫn dùng /."""
+    return " ".join('"' + a.replace("\\", "/") + '"' if (" " in a or "\\" in a or "/" in a) else a for a in argv)
 
 
 # ── cấu hình, backend, token ────────────────────────────────────────────────────────────────────────────
@@ -319,16 +384,45 @@ def request(method, url, *, body=None, form=None, token=None, timeout=30):
 _token_lock = threading.Lock()
 
 
+def _dpapi(data, protect):
+    """Windows DPAPI: chỉ tài khoản Windows này giải mã được (CryptProtectData, qua ctypes)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    buf = ctypes.create_string_buffer(data, len(data))
+    src, dst = Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), Blob()
+    crypt32, kernel32 = ctypes.windll.crypt32, ctypes.windll.kernel32
+    fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(src), None, None, None, None, 0x1, ctypes.byref(dst)):  # 0x1: không hiện hộp thoại
+        raise Abort("Không mã hoá / giải mã được token (DPAPI). Chạy xdlc logout rồi xdlc login.")
+    try:
+        return ctypes.string_at(dst.pbData, dst.cbData)
+    finally:
+        kernel32.LocalFree(dst.pbData)
+
+
+def _auth():
+    raw = load_json(XDLC / "auth.json", {})
+    if WINDOWS and "dpapi" in raw:
+        return json.loads(_dpapi(base64.b64decode(raw["dpapi"]), protect=False).decode("utf-8"))
+    return raw
+
+
 def tokens(env=None):
-    return load_json(XDLC / "auth.json", {}).get(env or config()["env"])
+    return _auth().get(env or config()["env"])
 
 
 def save_tokens(env, t):
-    auth = load_json(XDLC / "auth.json", {})
+    auth = _auth()
     if t is None:
         auth.pop(env, None)
     else:
         auth[env] = t
+    if WINDOWS:
+        auth = {"dpapi": base64.b64encode(_dpapi(json.dumps(auth).encode("utf-8"), protect=True)).decode()}
     save_json(XDLC / "auth.json", auth, private=True)
 
 
@@ -464,7 +558,8 @@ def bundle_version():
 
 
 def mcp_entry():
-    return {"command": str(xdlc_path()), "args": ["mcp"]}
+    argv = xdlc_argv()
+    return {"command": argv[0], "args": argv[1:] + ["mcp"]}
 
 
 # ── danh sách đã setup ──────────────────────────────────────────────────────────────────────────────────
@@ -515,7 +610,7 @@ def set_exclude(base, rels):
     prefix = Path(base).resolve().relative_to(root).as_posix()
     begin = f"# xdlc:begin {prefix if prefix != '.' else '/'} (Xora DLC, Local)"
     f = _exclude_file(base)
-    lines = f.read_text().splitlines() if f.exists() else []
+    lines = f.read_text(encoding="utf-8").splitlines() if f.exists() else []
     if begin in lines:
         a = lines.index(begin)
         b = next((i for i in range(a, len(lines)) if lines[i] == EXCLUDE_END), a)
@@ -524,7 +619,7 @@ def set_exclude(base, rels):
         pre = "" if prefix == "." else prefix + "/"
         lines += [begin] + ["/" + pre + r for r in sorted(rels)] + [EXCLUDE_END]
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text("\n".join(lines) + ("\n" if lines else ""))
+    f.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
 def local_git(base, rels, old, interactive):
@@ -584,13 +679,13 @@ def setup_kiro(bundle, scope, path, old, interactive):
     src, base = bundle / "dev", Path(path)
     mcp_file = base / MCP_REL
     plan = kiro_files(src, scope)
-    git_choice = local_git(base, [str(r) for _, r in plan] + [MCP_REL], old, interactive) if scope == "local" else None
+    git_choice = local_git(base, [r.as_posix() for _, r in plan] + [MCP_REL], old, interactive) if scope == "local" else None
     files = {}
     for f, rel in plan:
         dst = base / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(f, dst)
-        files[str(rel)] = sha256(dst)
+        files[rel.as_posix()] = sha256(dst)
     for rel, digest in (old or {}).get("files", {}).items():  # file của bản cũ không còn trong bản mới
         if rel not in files:
             remove_file(base, rel, digest, interactive)
@@ -640,10 +735,27 @@ def need_claude():
         raise Abort("Không thấy lệnh 'claude'. Cài Claude Code trước: https://code.claude.com")
 
 
+def claude_bundle(bundle):
+    """Bản plugin trong ~/.xdlc cho Claude Code: MCP server và hook đều gọi xdlc (không cần cat / python3)."""
+    dev = bundle / "dev"
+    save_json(dev / ".mcp.json", {"mcpServers": {SERVER: mcp_entry()}})
+    xdlc = shell_cmd(xdlc_argv())
+    hooks = load_json(dev / "hooks" / "hooks.json", {})
+    for groups in hooks.get("hooks", {}).values():
+        for g in groups:
+            for h in g.get("hooks", []):
+                c = h.get("command", "")
+                if c.startswith("cat "):
+                    h["command"] = f"{xdlc} _print {c[4:]}"
+                elif "/sensor/convention_sensor.py" in c:
+                    h["command"] = f"{xdlc} sensor " + c.split("convention_sensor.py\"", 1)[-1].strip()
+    save_json(dev / "hooks" / "hooks.json", hooks)
+
+
 def setup_claude(bundle, scope, path, old, interactive):
     need_claude()
     git_choice = local_git(path, [CLAUDE_LOCAL], old, interactive) if scope == "local" else None
-    save_json(bundle / "dev" / ".mcp.json", {"mcpServers": {SERVER: mcp_entry()}})  # bản trong ~/.xdlc
+    claude_bundle(bundle)
     if run(["claude", "plugin", "marketplace", "add", str(bundle)], check=False).returncode != 0:
         run(["claude", "plugin", "marketplace", "update", MARKET])
     r = run(["claude", "plugin", "install", PLUGIN, "--scope", CLAUDE_SCOPE[scope]], cwd=path, check=False)
@@ -926,6 +1038,8 @@ def cmd_update(argv):
     os.replace(tmp, target)
     print(f"Đã cập nhật xdlc và plugin ({ref or 'bản local'}). Cài lại vào các chỗ đã setup:")
     # Bản mới tự cài lại, để logic cài là của bản mới.
+    if WINDOWS:
+        raise Abort("", subprocess.run([sys.executable, str(target), "_reapply"]).returncode)
     os.execv(sys.executable, [sys.executable, str(target), "_reapply"])
 
 
@@ -937,6 +1051,20 @@ def cmd_version(argv):
     latest = latest_release()
     if latest and _semver(latest) > _semver(VERSION):
         print(f"Có bản mới {latest}: chạy xdlc update.")
+
+
+def _remove_from_user_path(folder):
+    """Windows: bỏ thư mục của xdlc khỏi PATH của user (install.ps1 đã thêm), báo cho cửa sổ mới biết."""
+    import ctypes
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE) as k:
+        try:
+            value, kind = winreg.QueryValueEx(k, "Path")
+        except FileNotFoundError:
+            return
+        keep = [p for p in value.split(";") if p and Path(p).resolve() != Path(folder).resolve()]
+        winreg.SetValueEx(k, "Path", 0, kind, ";".join(keep))
+    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 0x0002, 5000, None)
 
 
 def cmd_uninstall(argv):
@@ -957,8 +1085,10 @@ def cmd_uninstall(argv):
     shutil.rmtree(XDLC, ignore_errors=True)
     if xdlc_path() == BIN and BIN.is_file():
         BIN.unlink()
-    print("Đã gỡ Xora DLC. Cài lại: curl -fsSL https://raw.githubusercontent.com/"
-          f"{REPO}/main/install.sh | sh")
+        if WINDOWS:
+            (BIN.parent / "xdlc.cmd").unlink(missing_ok=True)
+            _remove_from_user_path(BIN.parent)
+    print("Đã gỡ Xora DLC. Cài lại: " + INSTALL_CMD)
 
 
 # ── MCP server cục bộ cho agent ─────────────────────────────────────────────────────────────────────────
@@ -1037,6 +1167,23 @@ def cmd_mcp(argv):
         t.join()
 
 
+def cmd_sensor(argv):
+    """Sensor convention của plugin, cùng Python với xdlc, UTF-8 (hook Kiro / Claude và chạy tay)."""
+    sensor = BUNDLE / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py"
+    if not sensor.is_file():  # sensor chỉ cảnh báo, không chặn: thiếu plugin cũng thoát 0
+        err("xdlc sensor: chưa có plugin trên máy, bỏ qua (chạy xdlc setup).")
+        return
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    raise Abort("", subprocess.run([sys.executable, str(sensor), *argv], env=env).returncode)
+
+
+def cmd_print(argv):
+    for f in argv:
+        sys.stdout.write(Path(f).read_text(encoding="utf-8"))
+        if not sys.stdout.isatty():
+            sys.stdout.write("\n")
+
+
 def cmd_reapply(argv):
     reapply(installs(), interactive=False)
 
@@ -1044,10 +1191,15 @@ def cmd_reapply(argv):
 COMMANDS = {"setup": cmd_setup, "remove": cmd_remove, "login": cmd_login, "logout": cmd_logout,
             "status": cmd_status, "use": cmd_use, "update": cmd_update, "version": cmd_version,
             "uninstall": cmd_uninstall}
-HIDDEN = {"mcp": cmd_mcp, "_reapply": cmd_reapply}
+HIDDEN = {"mcp": cmd_mcp, "sensor": cmd_sensor, "_print": cmd_print, "_reapply": cmd_reapply}
 
 
 def main(argv):
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     if not argv or argv[0] in ("-h", "--help", "help"):
         if len(argv) == 2 and argv[1] in CMD_HELP:
             print(CMD_HELP[argv[1]])
@@ -1068,7 +1220,8 @@ def main(argv):
     try:
         fn(rest)
     except Abort as e:
-        (print if e.code == 0 else err)(str(e) if e.code == 0 else f"xdlc: {e}")
+        if str(e):
+            (print if e.code == 0 else err)(str(e) if e.code == 0 else f"xdlc: {e}")
         return e.code
     except KeyboardInterrupt:
         err("\nĐã huỷ.")

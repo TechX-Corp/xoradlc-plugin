@@ -22,6 +22,6 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "Chạy `python3 ~/.xdlc/plugin/agents-plugin/dev/sensor/convention_sensor.py` ở gốc workspace (không truyền file: sensor tự kiểm các file đang đổi trong git). Có cảnh báo thì: sửa những vi phạm nằm trong phần code bạn vừa sinh / sửa; vi phạm ở code cũ hoặc chỗ cố ý giữ thì chỉ liệt kê cho Developer, không tự sửa lan ra. Không thêm `convention-ignore` khi Developer chưa đồng ý. Sensor báo chưa có convention.md thì nhắc Developer một lần: copy `~/.xdlc/plugin/agents-plugin/dev/convention.sample.md` về gốc repo thành `convention.md` rồi sửa theo dự án; không nhắc lại, không tự tạo."
+    "prompt": "Chạy `xdlc sensor` ở gốc workspace (không truyền file: sensor tự kiểm các file đang đổi trong git). Có cảnh báo thì: sửa những vi phạm nằm trong phần code bạn vừa sinh / sửa; vi phạm ở code cũ hoặc chỗ cố ý giữ thì chỉ liệt kê cho Developer, không tự sửa lan ra. Không thêm `convention-ignore` khi Developer chưa đồng ý. Sensor báo chưa có convention.md thì nhắc Developer một lần: copy `~/.xdlc/plugin/agents-plugin/dev/convention.sample.md` về gốc repo thành `convention.md` rồi sửa theo dự án; không nhắc lại, không tự tạo."
   }
 }

@@ -3,7 +3,8 @@ import json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-ROLES = ["dev"]  # các vai khác ở archived/, không kiểm
+ROLES = ["dev"]
+WIN = os.name == "nt"  # các vai khác ở archived/, không kiểm
 
 
 def main():
@@ -85,7 +86,7 @@ def check_kiro():
         head = (d / "POWER.md").read_text().split("---")[1]
         assert f"name: xora-{role}\n" in head and f'mcpServers: ["xora-{role}"]' in head, role
     for hook in (ROOT / "dev" / "kiro-hooks").glob("*.kiro.hook"):
-        assert "~/.xdlc/plugin/agents-plugin/dev/sensor/convention_sensor.py" in json.loads(hook.read_text())["then"]["prompt"]
+        assert "`xdlc sensor`" in json.loads(hook.read_text(encoding="utf-8"))["then"]["prompt"]
 
 
 def check_xdlc():
@@ -144,17 +145,28 @@ def check_xdlc():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp) / "home"; home.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("XDLC_", "XORA_"))} | {
-            "HOME": str(home), "XDLC_PLUGIN_DIR": str(repo), "XDLC_NO_BROWSER": "1"}
-        xdlc = home / ".local" / "bin" / "xdlc"
+            "HOME": str(home), "USERPROFILE": str(home), "XDLC_PLUGIN_DIR": str(repo), "XDLC_NO_BROWSER": "1",
+            "XDLC_BIN_DIR": str(home / "bin"), "XDLC_NO_PATH": "1"}
+        xdlc = home / "bin" / ("xdlc.py" if WIN else "xdlc")
 
         def x(*args, cwd=None, inp="", ok=True):
             r = subprocess.run([sys.executable, str(xdlc), *args], cwd=cwd or home, env=env, input=inp,
-                               capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, encoding="utf-8", timeout=60)
             assert (r.returncode == 0) == ok, (args, r.returncode, r.stdout, r.stderr)
             return r.stdout + r.stderr
 
-        out = subprocess.run(["sh", str(repo / "install.sh")], env=env, capture_output=True, text=True, check=True).stdout
-        assert xdlc.is_file() and os.access(xdlc, os.X_OK) and f"xdlc {version}" in out, out
+        if WIN:  # install.ps1 (powershell -File), không sửa PATH thật
+            r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(repo / "install.ps1")],
+                               env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            assert r.returncode == 0 and f"xdlc {version}" in r.stdout, r.stdout + r.stderr
+            shim = (home / "bin" / "xdlc.cmd").read_text()
+            assert shim.startswith("@echo off") and '"%~dp0xdlc.py" %*' in shim, shim
+            assert f"xdlc {version}" in subprocess.run([str(home / "bin" / "xdlc.cmd"), "--version"], env=env,
+                                                       capture_output=True, text=True, encoding="utf-8").stdout
+        else:
+            out = subprocess.run(["sh", str(repo / "install.sh")], env=env, capture_output=True, text=True, check=True).stdout
+            assert os.access(xdlc, os.X_OK) and f"xdlc {version}" in out, out
+        assert xdlc.is_file()
         assert "setup" in x() and "uninstall" in x() and "--agent" in x("setup", "--help")
         readme = (ROOT / "README.md").read_text().split("```text\n", 1)[1].split("\n```", 1)[0]
         assert x().rstrip("\n") == readme, "README (mục Các lệnh) phải khớp đúng output của `xdlc`"
@@ -171,8 +183,19 @@ def check_xdlc():
         assert (kiro / "skills" / "implement" / "SKILL.md").is_file() and (kiro / "steering" / "xora-dev.md").is_file()
         assert (kiro / "hooks" / "convention-sensor.kiro.hook").is_file()
         servers = json.loads((kiro / "settings" / "mcp.json").read_text())["mcpServers"]
-        assert servers["postgres"] == {"command": "pg"} and servers["xora-dev"]["command"] == str(xdlc)
-        assert servers["xora-dev"]["args"] == ["mcp"]
+        entry = servers["xora-dev"]
+        assert servers["postgres"] == {"command": "pg"} and entry["args"][-1] == "mcp"
+        if WIN:  # Windows không chạy thẳng file .py: py -3 / python <xdlc.py> mcp
+            assert Path(entry["command"]).name.lower() in ("py.exe", "python.exe") and entry["args"][-2] == str(xdlc), entry
+        else:
+            assert entry == {"command": str(xdlc), "args": ["mcp"], "disabled": False, "autoApprove": []}, entry
+        # agent chạy đúng lệnh trong mcp.json: initialize trả lời được (chưa đăng nhập vẫn trả lời cục bộ)
+        r = subprocess.run([entry["command"], *entry["args"]], env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
+                           input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n")
+        assert json.loads(r.stdout)["result"]["serverInfo"]["name"] == "xoradlc", r.stdout + r.stderr
+        # xdlc sensor: chạy sensor của plugin (chưa có convention.md: nhắc và không chặn)
+        r = subprocess.run([sys.executable, str(xdlc), "sensor"], cwd=ws, env=env, capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode == 0, r.stdout + r.stderr
         assert (home / ".xdlc" / "plugin" / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py").is_file()
         assert "Đã cài lại" in x("setup", "--agent=kiro", "--scope=local", cwd=ws)
         assert len(json.loads((home / ".xdlc" / "installs.json").read_text())["installs"]) == 1, "setup lại không tạo mục trùng"
@@ -214,12 +237,17 @@ def check_xdlc():
         assert resp[3]["result"]["isError"] and "xdlc login" in resp[3]["result"]["content"][0]["text"], resp[3]
         assert "chưa đăng nhập" in x("status")
 
-        p = subprocess.Popen([sys.executable, str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        p = subprocess.Popen([sys.executable, str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, encoding="utf-8")
         url = next(l for l in p.stdout if l.startswith("http"))
         urllib.request.urlopen(url.strip(), timeout=10).read()  # "trình duyệt": authorize → loopback callback
         rest = p.stdout.read(); assert p.wait(timeout=30) == 0, rest
         assert "Đã đăng nhập: Dat Dev (dat.dev) · vai DEV" in rest, rest
-        assert oct((home / ".xdlc" / "auth.json").stat().st_mode & 0o777) == "0o600"
+        auth = json.loads((home / ".xdlc" / "auth.json").read_text(encoding="utf-8"))
+        if WIN:  # DPAPI: file không chứa token dạng rõ
+            assert list(auth) == ["dpapi"] and "at-1" not in json.dumps(auth), auth
+        else:
+            assert oct((home / ".xdlc" / "auth.json").stat().st_mode & 0o777) == "0o600" and auth["local"]["access_token"] == "at-1"
         st = x("status")
         assert "Dat Dev" in st and "local" in st and st.count("Kiro    Local") == 4, st
         resp = {r["id"]: r for r in map(json.loads, x("mcp", inp=mcp_in).splitlines())}
@@ -228,6 +256,7 @@ def check_xdlc():
 
         # version, update (từ bản clone), remove, logout, uninstall
         assert f"xdlc {version}" in x("version")
+        check_claude_bundle(home, xdlc)
         assert "Đã cập nhật" in x("update")
         assert "Đã gỡ" in x("remove", "--agent", "kiro", cwd=ws, inp="1\ny\n")
         assert not (kiro / "skills" / "implement").exists() and (kiro / "skills" / "deploy-guide" / "SKILL.md").is_file()
@@ -237,6 +266,26 @@ def check_xdlc():
         assert not (home / ".xdlc").exists() and not xdlc.exists()
         assert not (lr / ".kiro").exists() and "xdlc" not in (lr / ".git" / "info" / "exclude").read_text()
     srv.shutdown()
+
+
+def check_claude_bundle(home, xdlc):
+    """Bản plugin Claude trong ~/.xdlc: .mcp.json và hook đều gọi xdlc (chạy được cả trên Windows)."""
+    import importlib.machinery, importlib.util
+    loader = importlib.machinery.SourceFileLoader("xdlc_mod", str(xdlc))
+    spec = importlib.util.spec_from_loader("xdlc_mod", loader)
+    mod = importlib.util.module_from_spec(spec); loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle = Path(tmp) / "agents-plugin"
+        import shutil
+        shutil.copytree(ROOT, bundle, ignore=shutil.ignore_patterns("archived"))
+        mod.claude_bundle(bundle)
+        mcp = json.loads((bundle / "dev" / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["xora-dev"]
+        assert mcp["args"][-1] == "mcp", mcp
+        cmds = [h["command"] for g in json.loads((bundle / "dev" / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"].values()
+                for e in g for h in e["hooks"]]
+        assert any(" _print " in c and "${CLAUDE_PLUGIN_ROOT}/AGENTS.md" in c for c in cmds), cmds
+        assert any(c.endswith(" sensor --hook claude") for c in cmds), cmds
+        assert not any(c.startswith(("cat ", "python3 ")) for c in cmds), cmds
 
 
 def pty_run(argv, steps, cwd, env, timeout=60):
@@ -270,12 +319,15 @@ def pty_run(argv, steps, cwd, env, timeout=60):
 
 
 def check_menu():
-    """Menu phím mũi tên trong terminal thật: ↓ + Enter chọn scope; Space chọn nhiều mục để gỡ; Esc huỷ."""
+    """Menu phím mũi tên trong terminal thật: ↓ + Enter chọn scope; Space chọn nhiều mục để gỡ; Esc huỷ.
+    pty chỉ có trên macOS / Linux; trên Windows menu dùng msvcrt, kiểm tay."""
+    if WIN:
+        return
     cli = str(ROOT.parent / "xdlc")
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp) / "home"; home.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("XDLC_", "XORA_"))} | {
-            "HOME": str(home), "XDLC_PLUGIN_DIR": str(ROOT.parent), "TERM": "xterm-256color"}
+            "HOME": str(home), "XDLC_PLUGIN_DIR": str(ROOT.parent), "TERM": "xterm-256color", "XDLC_BIN_DIR": str(home / "bin")}
         down, enter = "\x1b[B", "\r"
         for name in ("a", "b"):
             (Path(tmp) / name).mkdir()

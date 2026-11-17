@@ -61,7 +61,7 @@ Tool `xora_ask(text, session_id?)` gửi câu hỏi tới Xora DLC như chat tr�
 Mỗi khi code được tạo hoặc sửa, sensor kiểm theo `convention.md` ở gốc repo và **cảnh báo** — không chặn. Claude Code chạy sensor tự động qua hook `PostToolUse` sau mỗi lần Write / Edit; công cụ khác thì tự chạy sau mỗi lần ghi code:
 
 ```sh
-python3 <thư mục plugin xora-dev>/sensor/convention_sensor.py   # kiểm các file đang đổi trong git
+xdlc sensor   # kiểm các file đang đổi trong git (--staged, --full, hoặc liệt kê file)
 ```
 
 - Có cảnh báo → sửa ngay những vi phạm **trong phần code bạn vừa sinh / sửa**. Vi phạm ở code cũ → chỉ liệt kê cho Developer, không tự sửa lan ra.

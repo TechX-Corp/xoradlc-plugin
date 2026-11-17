@@ -6,36 +6,65 @@ Các vai khác (`ba`, `techlead`, `qa`, `reviewer`, `delivery`) đã chuyển v�
 
 ## Cài đặt
 
-Cần `python3` 3.9+ (macOS có sẵn). Dùng Claude Code thì cần thêm lệnh `claude`; Kiro thì `kiro-cli`.
+Cần Python 3.9+ và git. Dùng Claude Code thì cần lệnh `claude`; Kiro thì `kiro-cli`. Ba bước: cài lệnh `xdlc`, cài plugin cho agent, đăng nhập.
 
-**1. Cài lệnh `xdlc`** (một file, vào `~/.local/bin`):
+### macOS / Linux / WSL
 
 ```bash
+# 1. Cài xdlc vào ~/.local/bin (macOS có sẵn python3)
 curl -fsSL https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.sh | sh
-```
 
-Nếu được nhắc, thêm `~/.local/bin` vào `PATH` rồi mở terminal mới.
-
-**2. Cài plugin cho agent.** Muốn cài cho một project thì `cd` vào thư mục project trước:
-
-```bash
+# 2. Cài plugin: cd vào project nếu chọn scope local
 cd ~/code/core-banking
-xdlc setup                                  # hỏi agent, rồi hỏi scope
-xdlc setup --agent kiro --scope local       # hoặc viết tắt, không hỏi
-```
+xdlc setup                              # hỏi agent, rồi scope
+xdlc setup --agent kiro --scope local   # hoặc viết tắt
 
-- **global**: mọi repo trên máy.
-- **local**: project hiện tại; git không theo dõi file của `xdlc` (ghi vào `.git/info/exclude`, chỉ máy bạn). Nếu các file đó đã được git theo dõi từ trước (team đã commit), `xdlc` liệt kê và hỏi: **gỡ khỏi git** (`git rm --cached`: file vẫn còn trên máy, nhưng khi commit thì bị gỡ khỏi repo của cả team) hay **giữ như hiện tại** (thay đổi của `xdlc` sẽ hiện trong `git status`).
-
-Setup local cho nhiều project được; setup lại đúng chỗ cũ là cài lại.
-
-**3. Đăng nhập** (SSO hoặc tài khoản local, như trên web):
-
-```bash
+# 3. Đăng nhập (mở trình duyệt; SSO hoặc tài khoản local như trên web)
 xdlc login
 ```
 
-Mở phiên Kiro / Claude Code mới và hỏi, ví dụ *"Việc của tôi trên Xora DLC là gì?"*.
+Nếu được nhắc, thêm `~/.local/bin` vào `PATH` (vd. `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc`) rồi mở terminal mới. Dùng WSL thì Kiro / Claude Code cũng phải chạy trong WSL.
+
+### Windows
+
+Chạy trong **PowerShell** hoặc **cmd** (nên dùng Windows Terminal: menu phím mũi tên hiển thị đúng).
+
+**Bước 0: cài Python và git** (bỏ qua nếu máy đã có; kiểm bằng `py --version` và `git --version`):
+
+```powershell
+winget install Python.Python.3.12
+winget install Git.Git
+```
+
+Cài từ python.org thì chọn *Add python.exe to PATH*. Cài xong, **mở cửa sổ PowerShell mới**.
+
+**Bước 1: cài `xdlc`** vào `%LOCALAPPDATA%\Programs\xdlc` (tự thêm vào `PATH` của user):
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.ps1 | iex"
+```
+
+Kiểm: `xdlc --version`. Cửa sổ terminal mở trước khi cài phải mở lại mới thấy lệnh `xdlc`.
+
+**Bước 2, 3: cài plugin và đăng nhập**, giống hệt macOS:
+
+```powershell
+cd C:\code\core-banking
+xdlc setup --agent claude --scope local
+xdlc login
+```
+
+Trên Windows, `xdlc` lưu dữ liệu ở `%USERPROFILE%\.xdlc` (token mã hoá bằng DPAPI, chỉ tài khoản Windows của bạn giải mã được). Lệnh `xdlc` là `xdlc.cmd` gọi `py -3 xdlc.py`.
+
+| Gặp | Xử lý |
+|---|---|
+| `xdlc is not recognized` / `'xdlc' không được nhận dạng` | Mở cửa sổ terminal mới. Vẫn lỗi: kiểm `PATH` của user có `%LOCALAPPDATA%\Programs\xdlc` |
+| `Python was not found; run without arguments to install from the Microsoft Store` | Đó là bản giả của Store. Cài Python ở Bước 0, hoặc tắt *App execution aliases* cho `python.exe` trong Settings |
+| `xdlc cần Python 3.9 trở lên` | Cài Python ở Bước 0, mở PowerShell mới, chạy lại lệnh cài |
+| PowerShell báo script bị chặn (ExecutionPolicy, AppLocker) | Dùng đúng lệnh có `-ExecutionPolicy ByPass` ở trên; máy công ty vẫn chặn thì nhờ IT |
+| Menu không đổi khi bấm ↑/↓ (console cũ) | Dùng Windows Terminal, hoặc đặt `set XDLC_PLAIN=1` để gõ số |
+
+Claude Code trên Windows cần Git for Windows (Bước 0). Kiro CLI trên Windows gốc chưa được kiểm: nếu Kiro chỉ chạy trong WSL thì cài `xdlc` trong WSL theo mục trên.
 
 ## Các lệnh
 
@@ -75,18 +104,19 @@ Thêm về từng lệnh:
 - `xdlc update`: tải bản phát hành mới nhất, thay `xdlc` và plugin, cài lại vào mọi chỗ đã setup (giữ lựa chọn cũ, không hỏi lại).
 - `xdlc uninstall`: gỡ mọi lần setup, đăng xuất, xoá `~/.xdlc` và chính lệnh `xdlc`.
 
-`xdlc` giữ token trong `~/.xdlc/auth.json` (quyền `600`) và tự làm mới. Agent chạy `xdlc mcp` (MCP server cục bộ, stdio); chưa đăng nhập thì `xora_ask` trả lời "chạy `xdlc login`". Backend không giữ danh sách token: muốn chặn hẳn một người thì khoá tài khoản.
+`xdlc` giữ token trong `~/.xdlc/auth.json` (macOS / Linux: quyền `600`; Windows: mã hoá DPAPI, chỉ tài khoản Windows đó giải mã được) và tự làm mới. Agent chạy `xdlc mcp` (MCP server cục bộ, stdio); chưa đăng nhập thì `xora_ask` trả lời "chạy `xdlc login`". Backend không giữ danh sách token: muốn chặn hẳn một người thì khoá tài khoản.
 
 **Phát hành bản mới** (người bảo trì): tăng `VERSION` trong `xdlc` và `version` trong `.claude-plugin/marketplace.json` (phải khớp, test kiểm), merge vào `main`, tạo tag `vX.Y.Z`. Thử bản chưa phát hành: `XDLC_REF=<nhánh> xdlc update`, hoặc `XDLC_PLUGIN_DIR=<bản clone>` cho `install.sh` / `xdlc setup` / `xdlc update`.
 
 ## Sensor convention (`dev`)
 
-Sau mỗi lần agent ghi / sửa code, sensor kiểm theo `convention.md` ở gốc repo và **chỉ cảnh báo**.
+Sau mỗi lần agent ghi / sửa code, sensor kiểm các **dòng vừa đổi** theo `convention.md` ở gốc repo và **chỉ cảnh báo**, không chặn. Luồng chi tiết: [dev/README.md](dev/README.md#sensor-chạy-thế-nào).
 
-- Tạo `convention.md`: copy `~/.xdlc/plugin/agents-plugin/dev/convention.sample.md` về gốc repo, sửa cho khớp dự án.
+- Tạo `convention.md`: copy `convention.sample.md` của plugin về gốc repo rồi sửa cho khớp dự án. Chưa có file này thì sensor không kiểm gì.
+  - macOS / Linux: `cp ~/.xdlc/plugin/agents-plugin/dev/convention.sample.md convention.md`
+  - Windows: `Copy-Item $HOME\.xdlc\plugin\agents-plugin\dev\convention.sample.md .\convention.md`
 - Luật `forbid` chỉ báo trên dòng đã đổi so với HEAD; `--full` để rà cả code cũ.
-- Chạy tay / CI: `python3 ~/.xdlc/plugin/agents-plugin/dev/sensor/convention_sensor.py [file …] [--staged] [--full]` (`--staged` cho git pre-commit).
-- Plugin dev làm được gì: [dev/README.md](dev/README.md).
+- Chạy tay / pre-commit: `xdlc sensor [file …] [--staged] [--full]` (`--staged` cho git pre-commit). CI không có `xdlc`: `python3 agents-plugin/dev/sensor/convention_sensor.py …` từ bản clone.
 - Bỏ qua một dòng: `convention-ignore: <ID> <lý do>`.
 
 ## Kiểm tra trước khi mở PR
@@ -96,4 +126,4 @@ Sau mỗi lần agent ghi / sửa code, sensor kiểm theo `convention.md` ở g
 ## Còn để ngỏ
 
 - Câu hỏi qua Xora DLC tối đa 3.800 ký tự (giới hạn `question` của backend), nên `upload-tech-doc` chỉ lưu được tài liệu ngắn hoặc phải tách phần.
-- Sensor chưa gửi cảnh báo về Xora DLC (xem [dev/README.md](dev/README.md)).
+- Sensor chỉ báo cho agent và dev trên máy, chưa gửi cảnh báo về Xora DLC: backend đã có `POST /governance/sensor-events` nhưng plugin chưa gọi (xem [dev/README.md](dev/README.md#gửi-cảnh-báo-về-xora-dlc-chưa-làm)).

@@ -25,7 +25,8 @@ Cách chạy:
   python3 convention_sensor.py --full [file …] # kiểm mọi dòng, kể cả code cũ (rà toàn bộ)
   python3 convention_sensor.py --hook claude   # hook PostToolUse của Claude Code: đọc JSON từ stdin
   python3 convention_sensor.py --base REV --json file …  # so với REV (pre-push của xdlc), in JSON cảnh báo
-Tìm convention.md: biến CONVENTION_FILE, hoặc đi ngược từ thư mục file lên tới gốc repo.
+Tìm convention.md: biến CONVENTION_FILE, hoặc đi ngược từ thư mục file lên tới gốc repo; không có thì dùng
+convention.md mặc định đi kèm plugin (cạnh thư mục sensor/).
 """
 import fnmatch
 import json
@@ -37,6 +38,7 @@ from pathlib import Path
 
 IGNORE = re.compile(r"convention-ignore:\s*([A-Z]+-\d+)")
 RULES_BLOCK = re.compile(r"```json\s*\n(.*?)\n```", re.S)
+DEFAULT_CONVENTION = Path(__file__).resolve().parent.parent / "convention.md"  # mặc định của plugin
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 
 
@@ -61,7 +63,11 @@ def find_convention(start):
                 return d / name
         if stop and d == stop:
             break
-    return None
+    return DEFAULT_CONVENTION if DEFAULT_CONVENTION.is_file() else None
+
+
+def conv_label(conv):
+    return "convention mặc định của plugin" if conv == DEFAULT_CONVENTION else conv.name
 
 
 def load_rules(conv_path):
@@ -165,7 +171,9 @@ def run(paths, full=False, staged=False, rev=None):
     if not conv:
         return None, None, []
     cfg = load_rules(conv)
-    base = conv.parent
+    # Mặc định của plugin: đường dẫn trong cảnh báo tính từ gốc repo, không từ thư mục plugin.
+    first = Path(paths[0]).resolve()
+    base = (git_root(first.parent) or Path.cwd()).resolve() if conv == DEFAULT_CONVENTION else conv.parent.resolve()
     warns = []
     for p in paths:
         p = Path(p).resolve()
@@ -179,7 +187,7 @@ def run(paths, full=False, staged=False, rev=None):
 
 def report(conv, version, warns, max_items=30):
     files = len({w[0] for w in warns})
-    head = f"⚠ Convention: {len(warns)} cảnh báo trong {files} file (theo {conv.name}" + (f" v{version}" if version else "") + ")"
+    head = f"⚠ Convention: {len(warns)} cảnh báo trong {files} file (theo {conv_label(conv)}" + (f" v{version}" if version else "") + ")"
     rows = []
     for rel, ln, r in warns[:max_items]:
         where = f"{rel}:{ln}" if ln else rel
@@ -244,13 +252,13 @@ def main(argv):
         print(json.dumps(as_json(conv, version, warns), ensure_ascii=False))
         return 0
     if paths and not conv:
-        print("Chưa có convention.md — copy convention.sample.md ở gốc plugin xora-dev về gốc repo thành convention.md, rồi sửa theo dự án.", file=sys.stderr)
+        print("Không tìm thấy convention.md (kể cả bản mặc định của plugin): bỏ qua.", file=sys.stderr)
         return 0
     if warns:
         print(report(conv, version, warns, max_items=200))
         return 0
     if conv:
-        print(f"✓ Convention: {len(paths)} file đạt ({conv.name}" + (f" v{version}" if version else "") + ").")
+        print(f"✓ Convention: {len(paths)} file đạt ({conv_label(conv)}" + (f" v{version}" if version else "") + ").")
     return 0
 
 

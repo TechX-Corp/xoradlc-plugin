@@ -60,26 +60,29 @@ Lệnh:
   setup      Cài plugin xora-dev cho Kiro CLI hoặc Claude Code
   remove     Gỡ một hay nhiều lần setup
   link       Chọn work order cho nhánh hiện tại (sensor gửi cảnh báo khi git push)
-  login      Đăng nhập Xora DLC (mở trình duyệt)
+  login      Đăng nhập Xora DLC
   logout     Đăng xuất Xora DLC trên máy này
   status     Backend, tài khoản và vai đang đăng nhập, nơi đã setup
   use        Chọn backend: bản deploy (prod) hoặc local
   update     Cập nhật xdlc và plugin lên bản mới nhất
-  version    Version đang cài và bản mới nhất
   uninstall  Gỡ toàn bộ Xora DLC khỏi máy
 
+Tuỳ chọn:
+  -v, --version  Version đang cài và bản mới nhất
+  -h, --help     Danh sách lệnh này
+
 Viết tắt (bỏ qua câu hỏi trên terminal):
-  xdlc setup --agent kiro|claude --scope global|local
-  xdlc remove --agent kiro|claude
-  xdlc link [WO-… [--step …]] [--branch …] [--list]
-  xdlc use prod | xdlc use local [--url URL]
+  xdlc setup -a, --agent kiro|claude  -s, --scope global|local
+  xdlc remove -a, --agent kiro|claude
+  xdlc link [WO-…] [-t, --step BƯỚC] [-b, --branch NHÁNH] [-l, --list]
+  xdlc use prod | xdlc use local [-u, --url URL]
 
 Scope: global = mọi repo trên máy; local = project hiện tại, git không theo dõi file của xdlc.
 Xem chi tiết một lệnh: xdlc <lệnh> --help
 """
 
 CMD_HELP = {
-    "setup": "xdlc setup [--agent kiro|claude] [--scope global|local]\n\nCài plugin xora-dev (skill, steering, sensor, MCP server) cho Kiro CLI hoặc Claude Code.\n"
+    "setup": "xdlc setup [-a, --agent kiro|claude] [-s, --scope global|local]\n\nCài plugin xora-dev (skill, steering, sensor, MCP server) cho Kiro CLI hoặc Claude Code.\n"
              "Thiếu --agent / --scope thì hỏi trên terminal. Scope:\n"
              "  global  mọi repo trên máy\n"
              "  local   project hiện tại (thư mục đang đứng); git không theo dõi file của xdlc\n"
@@ -87,10 +90,10 @@ CMD_HELP = {
              "Setup local cho nhiều project được; setup lại cùng chỗ là cài lại.\n"
              "Local cài thêm hook git pre-push (sensor gửi cảnh báo về Xora DLC khi push). Global thì chạy\n"
              "xdlc link trong từng repo cần gửi cảnh báo.",
-    "remove": "xdlc remove [--agent kiro|claude]\n\nChọn các lần setup cần gỡ: ↑/↓ di chuyển, Space đánh dấu, a tất cả, Enter xác nhận\n"
+    "remove": "xdlc remove [-a, --agent kiro|claude]\n\nChọn các lần setup cần gỡ: ↑/↓ di chuyển, Space đánh dấu, a tất cả, Enter xác nhận\n"
               "(không có terminal: gõ 1,3 | 1-2 | all). Chỉ xoá đúng file xdlc đã cài;\n"
               "file bạn đã sửa thì hỏi trước. Trong mcp.json chỉ xoá khối xora-dev.",
-    "link": "xdlc link [WO-… [--step BƯỚC]] [--branch NHÁNH] [--list]\n\nMap nhánh hiện tại của repo (nhận diện bằng URL origin) với một bước bạn đang làm trong Xora DLC,\n"
+    "link": "xdlc link [WO-…] [-t, --step BƯỚC] [-b, --branch NHÁNH] [-l, --list]\n\nMap nhánh hiện tại của repo (nhận diện bằng URL origin) với một bước bạn đang làm trong Xora DLC,\n"
             "để hook pre-push gửi cảnh báo convention về đúng work order. Không tham số: menu các bước đang làm\n"
             "(lấy từ Việc của tôi). WO-…: chọn thẳng (thêm --step nếu WO đó có nhiều bước). --list: in map hiện tại\n"
             "và các bước có thể chọn. Repo chưa có hook pre-push của xdlc thì cài luôn.",
@@ -98,11 +101,11 @@ CMD_HELP = {
              "Trình duyệt đang đăng nhập web sẵn thì dùng luôn tài khoản đó: xdlc in ra tài khoản để bạn kiểm.",
     "logout": "xdlc logout\n\nXoá token Xora DLC của backend đang dùng khỏi máy này.",
     "status": "xdlc status\n\nIn version, backend đang dùng, tài khoản và vai đang đăng nhập, và các lần setup.",
-    "use": "xdlc use [prod|local] [--url URL]\n\nKhông tham số: in backend đang dùng. prod = bản deploy, local = backend chạy trên máy\n"
+    "use": "xdlc use [prod|local] [-u, --url URL]\n\nKhông tham số: in backend đang dùng. prod = bản deploy, local = backend chạy trên máy\n"
            "(mặc định http://localhost:8000; --url đổi và ghi nhớ). Token tách riêng theo backend.\n"
            "Sau khi đổi, mở phiên agent mới (hoặc reconnect trong /mcp).",
     "update": "xdlc update\n\nTải bản phát hành mới nhất (git tag vX.Y.Z), thay xdlc và plugin, rồi cài lại vào mọi chỗ đã setup.",
-    "version": "xdlc version\n\nIn version xdlc, version plugin đã cài, và bản mới nhất nếu có.",
+    "--version": "xdlc --version (hoặc -v)\n\nIn version xdlc, version plugin đã cài, và bản mới nhất nếu có.",
     "uninstall": "xdlc uninstall\n\nGỡ mọi lần setup, đăng xuất, xoá ~/.xdlc và chính lệnh xdlc. Hỏi xác nhận trước.",
 }
 
@@ -846,9 +849,10 @@ def pre_push(argv):
         except ValueError:
             err(f"xdlc pre-push: sensor lỗi, bỏ qua ({(r.stderr or r.stdout).strip()[:200]})")
             continue
-        if not result.get("convention"):
-            continue  # repo chưa có convention.md: không kiểm, không gửi
-        found = result["findings"]
+        found = result.get("findings") or []
+        if not found:
+            print(f"xdlc: không có cảnh báo convention trên nhánh {branch}.")
+            continue  # không có gì để gửi (cũng không hỏi work order)
         print(f"xdlc: {len(found)} cảnh báo convention trên nhánh {branch} ({len(files)} file thay đổi).")
         for x in found[:20]:
             fix = f" → {x['fix']}" if x.get("fix") else ""
@@ -1038,15 +1042,24 @@ def after_claude_removed(items):
 
 # ── lệnh ────────────────────────────────────────────────────────────────────────────────────────────────
 
+SHORT = {"-a": "--agent", "-s": "--scope", "-t": "--step", "-b": "--branch", "-l": "--list", "-u": "--url"}
+
+
+def long_opts(argv):
+    """-a kiro → --agent kiro (tuỳ chọn ngắn, như -v / --version)."""
+    return [SHORT.get(a, a) for a in argv]
+
+
 def options(argv, allowed):
-    """--agent kiro|claude, --scope global|local (cả dạng --x=y) → dict."""
+    """-a, --agent kiro|claude; -s, --scope global|local (cả dạng --x=y) → dict."""
     vals = {"agent": AGENTS, "scope": SCOPES}
+    argv = long_opts(argv)
     out, i = {}, 0
     while i < len(argv):
         k, eq, v = argv[i].partition("=")
         name = k[2:] if k.startswith("--") else None
         if name not in allowed:
-            raise Abort("Tuỳ chọn: " + " ".join(f"--{n} {'|'.join(vals[n])}" for n in allowed), 2)
+            raise Abort("Tuỳ chọn: " + "  ".join(f"-{n[0]}, --{n} {'|'.join(vals[n])}" for n in allowed), 2)
         if not eq:
             i += 1
             v = argv[i] if i < len(argv) else ""
@@ -1245,17 +1258,18 @@ def cmd_status(argv):
 
 
 def cmd_use(argv):
+    argv = long_opts(argv)
     c = config()
     if not argv:
         print(f"Đang dùng: {c['env']}  {base_url(c)}")
-        print("Đổi: xdlc use prod | xdlc use local [--url URL]")
+        print("Đổi: xdlc use prod | xdlc use local [-u, --url URL]")
         return
     env, rest = argv[0], argv[1:]
     if env not in ("prod", "local"):
-        raise Abort("xdlc use prod | xdlc use local [--url URL]", 2)
+        raise Abort("xdlc use prod | xdlc use local [-u, --url URL]", 2)
     if rest:
         if env != "local" or len(rest) != 2 or rest[0] != "--url" or not rest[1].startswith(("http://", "https://")):
-            raise Abort("--url chỉ dùng với local, vd: xdlc use local --url http://localhost:9000", 2)
+            raise Abort("-u / --url chỉ dùng với local, vd: xdlc use local -u http://localhost:9000", 2)
         c["local_url"] = rest[1].rstrip("/")
     changed = env != c["env"] or bool(rest)
     c["env"] = env
@@ -1467,6 +1481,7 @@ def cmd_print(argv):
 
 
 def cmd_link(argv):
+    argv = long_opts(argv)
     wo = step_id = branch = None
     list_only, i = False, 0
     while i < len(argv):
@@ -1479,7 +1494,7 @@ def cmd_link(argv):
         elif not a.startswith("-") and wo is None:
             wo = a
         else:
-            raise Abort("xdlc link [WO-… [--step BƯỚC]] [--branch NHÁNH] [--list]", 2)
+            raise Abort("xdlc link [WO-…] [-t, --step BƯỚC] [-b, --branch NHÁNH] [-l, --list]", 2)
         i += 1
     root = git_root(Path.cwd())
     if not root:
@@ -1519,9 +1534,9 @@ def cmd_reapply(argv):
 
 
 COMMANDS = {"setup": cmd_setup, "remove": cmd_remove, "link": cmd_link, "login": cmd_login, "logout": cmd_logout,
-            "status": cmd_status, "use": cmd_use, "update": cmd_update, "version": cmd_version,
-            "uninstall": cmd_uninstall}
-HIDDEN = {"mcp": cmd_mcp, "sensor": cmd_sensor, "_print": cmd_print, "_reapply": cmd_reapply}
+            "status": cmd_status, "use": cmd_use, "update": cmd_update, "uninstall": cmd_uninstall}
+# "version": tên cũ của --version, vẫn chạy nhưng không hiện trong danh sách.
+HIDDEN = {"mcp": cmd_mcp, "sensor": cmd_sensor, "_print": cmd_print, "_reapply": cmd_reapply, "version": cmd_version}
 
 
 def main(argv):
@@ -1531,13 +1546,15 @@ def main(argv):
         except (AttributeError, ValueError):
             pass
     if not argv or argv[0] in ("-h", "--help", "help"):
-        if len(argv) == 2 and argv[1] in CMD_HELP:
+        if len(argv) == 2 and argv[1] in ("-v", "version"):
+            print(CMD_HELP["--version"])
+        elif len(argv) == 2 and argv[1] in CMD_HELP:
             print(CMD_HELP[argv[1]])
         else:
             print(HELP.format(v=VERSION).rstrip())
         return 0
     if argv[0] in ("-v", "--version"):
-        argv = ["version"]
+        argv = ["version", *argv[1:]]
     cmd, rest = argv[0], argv[1:]
     if cmd in COMMANDS and rest[:1] in (["-h"], ["--help"]):
         print(CMD_HELP[cmd])

@@ -10,12 +10,12 @@ Plugin cho vai Developer, chạy trên Claude Code và Kiro.
 | Lập hoặc rà hồ sơ changeset (mô tả PR), ghi rõ phần do AI sinh | Skill `changeset` |
 | Lưu tài liệu kỹ thuật vào KB / S3 qua agent AAP, sau khi người dùng xác nhận | Skill `upload-tech-doc` |
 | Hỏi Xora DLC (việc của tôi, work order, tài liệu, open question) và KB nội bộ (convention, tiền lệ), có trích dẫn; AAP tự chọn function MCP của Xora DLC. Đăng nhập bằng `xdlc login`, không key | MCP `xora-dev`, tool `xora_ask` |
-| Kiểm code theo `convention.md` của dự án và cảnh báo vi phạm | Sensor convention |
+| Kiểm code theo `convention.md` của dự án (không có thì theo bản mặc định của plugin) và cảnh báo vi phạm | Sensor convention |
 
 ## Sensor chạy thế nào
 
 1. **Kích hoạt.** Agent ghi / sửa một file code → hook của agent chạy `xdlc sensor` (dev cũng chạy tay hoặc gắn vào pre-commit).
-2. **Tìm luật.** Sensor tìm `convention.md` (biến `CONVENTION_FILE`, hoặc đi ngược từ file lên tới gốc repo; cả `docs/convention.md`), đọc khối ```` ```json ```` chứa luật. Không có file → in lời nhắc tạo `convention.md`, không kiểm gì.
+2. **Tìm luật.** Sensor tìm `convention.md` (biến `CONVENTION_FILE`, hoặc đi ngược từ file lên tới gốc repo; cả `docs/convention.md`), đọc khối ```` ```json ```` chứa luật. Repo không có file → dùng `convention.md` mặc định đi kèm plugin (hiện chưa có luật nào, sẽ bổ sung sau).
 3. **Chọn file.** Claude Code: đúng file vừa sửa (lấy từ dữ liệu hook). Kiro / chạy tay không truyền file: các file đang đổi trong git (staged, chưa staged, mới). `--staged`: chỉ phần đã staged, đọc bản trong index.
 4. **Chọn dòng** (cho luật `forbid`). So với HEAD bằng `git diff`: chỉ xét dòng đã đổi, để code cũ không làm ngập cảnh báo. File mới, ngoài git, repo chưa có commit, hoặc `--full`: xét mọi dòng.
 5. **Kiểm.** Mỗi luật áp cho file khớp `files` (trừ `exclude`). Bốn kiểu: `forbid` (regex không được có trên dòng nào; chỉ xét dòng đã đổi), `require` (regex phải có trong file), `filename` (tên file phải khớp regex), `max_lines` (file không quá `max` dòng); ba kiểu sau xét cả file. Dòng có `convention-ignore: <ID> <lý do>` thì bỏ qua luật đó.
@@ -29,7 +29,7 @@ Plugin cho vai Developer, chạy trên Claude Code và Kiro.
 | Git pre-commit (dự án tự gắn) | Developer commit: `xdlc sensor --staged` | Phần đã staged |
 | Git pre-push (`xdlc` cài) | Developer push: `xdlc sensor --pre-push`, rồi gửi về Xora DLC | File thay đổi so với remote |
 
-Hook của Kiro là file JSON v1 (`PostFileSave`, action `agent`): scope local ở `.kiro/hooks/`, scope global ở `~/.kiro/hooks/` (chạy ở mọi workspace; lời nhắc chỉ cho agent chạy sensor khi repo có `convention.md`).
+Hook của Kiro là file JSON v1 (`PostFileSave`, action `agent`): scope local ở `.kiro/hooks/`, scope global ở `~/.kiro/hooks/` (chạy ở mọi workspace).
 
 ## Sensor cảnh báo dev qua đâu
 
@@ -60,7 +60,7 @@ Sensor chỉ cảnh báo, không chặn gì: luôn thoát với mã 0, kể cả
 Hook git `pre-push` (`xdlc sensor --pre-push`) gửi cảnh báo về `POST /governance/sensor-events`; backend ghi mỗi cảnh báo thành một governance alert của vai Dev ở bước đã map.
 
 1. Mỗi nhánh được push: tính các file thay đổi so với commit đã có trên remote (nhánh mới: so với nhánh mặc định của remote, không có thì commit trước đó), chạy sensor với `--base <commit đó> --json`.
-2. Repo không có `convention.md`: không kiểm, không gửi.
+2. Không có cảnh báo nào: không gửi (cũng không hỏi work order).
 3. Tìm work order đã map với (URL `origin`, nhánh) bằng `xdlc link`. Chưa map: hỏi trên terminal (menu Việc của tôi), không có terminal thì bỏ qua lần gửi.
 4. Gửi bằng token OAuth của `xdlc login`: work order, bước, máy, repo, commit, và mỗi cảnh báo (file, dòng, mã luật, mức, nội dung, thời điểm). Không gửi nội dung dòng code.
 5. Backend chỉ nhận khi người đăng nhập là Dev của work order đó (403 nếu không: chọn lại bằng `xdlc link`).

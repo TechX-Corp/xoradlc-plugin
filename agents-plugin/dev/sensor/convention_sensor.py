@@ -6,6 +6,8 @@ convention.md có một khối ```json chứa luật:
      {"id": "SEC-001", "type": "forbid", "files": ["**/*.java"], "exclude": ["**/test/**"],
       "pattern": "regex", "message": "…", "fix": "…"} ]}
 
+Tuỳ chọn mỗi luật: "severity": "red" | "yellow" (mặc định yellow), mức của governance alert khi gửi về Xora DLC.
+
 Kiểu luật:
   forbid     regex không được xuất hiện trên dòng nào (báo từng dòng)
   require    regex phải xuất hiện ít nhất một lần trong file
@@ -22,6 +24,7 @@ Cách chạy:
   python3 convention_sensor.py --staged        # chỉ phần đã staged (dùng cho git pre-commit)
   python3 convention_sensor.py --full [file …] # kiểm mọi dòng, kể cả code cũ (rà toàn bộ)
   python3 convention_sensor.py --hook claude   # hook PostToolUse của Claude Code: đọc JSON từ stdin
+  python3 convention_sensor.py --base REV --json file …  # so với REV (pre-push của xdlc), in JSON cảnh báo
 Tìm convention.md: biến CONVENTION_FILE, hoặc đi ngược từ thư mục file lên tới gốc repo.
 """
 import fnmatch
@@ -126,12 +129,13 @@ def git(root, *args):
     return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
 
 
-def changed_lines(path, staged):
-    """Số dòng đã đổi (set), hoặc None = xét mọi dòng (ngoài git, file mới, repo chưa có commit)."""
+def changed_lines(path, staged, rev=None):
+    """Số dòng đã đổi (set), hoặc None = xét mọi dòng (ngoài git, file mới, repo chưa có commit).
+    rev: so với commit này thay vì HEAD (pre-push: commit đã có trên remote)."""
     root = git_root(path.parent)
     if not root or git(root, "ls-files", "--error-unmatch", str(path)).returncode != 0:
         return None
-    base = ["--cached"] if staged else ["HEAD"]
+    base = ["--cached"] if staged else [rev or "HEAD"]
     res = git(root, "diff", "-U0", "--no-color", "--no-ext-diff", *base, "--", str(path))
     if res.returncode != 0:  # chưa có HEAD
         return None
@@ -153,7 +157,7 @@ def changed_files(root, staged=False):
     return [root / f for f in sorted(files) if (root / f).is_file()]
 
 
-def run(paths, full=False, staged=False):
+def run(paths, full=False, staged=False, rev=None):
     """Trả (convention_path, version, danh sách cảnh báo)."""
     if not paths:
         return None, None, []
@@ -169,7 +173,7 @@ def run(paths, full=False, staged=False):
             rel = p.relative_to(base).as_posix()
         except ValueError:
             rel = p.name
-        warns += check_file(p, rel, cfg, None if full else changed_lines(p, staged), staged)
+        warns += check_file(p, rel, cfg, None if full else changed_lines(p, staged, rev), staged)
     return conv, cfg.get("version"), warns
 
 
@@ -211,11 +215,22 @@ def hook_claude():
     return 0
 
 
+def as_json(conv, version, warns):
+    """Cảnh báo dạng dữ liệu (xdlc gửi về POST /governance/sensor-events)."""
+    return {"convention": str(conv) if conv else None, "version": version, "findings": [
+        {"file": rel, "line": ln or None, "rule_code": r["id"],
+         "severity": r.get("severity") if r.get("severity") in ("red", "yellow") else "yellow",
+         "message": r.get("message") or r["id"], "fix": r.get("fix") or ""}
+        for rel, ln, r in warns]}
+
+
 def main(argv):
     if argv[:2] == ["--hook", "claude"]:
         return hook_claude()
-    full, staged = ("--full" in argv), ("--staged" in argv)
-    args = [a for a in argv if a not in ("--full", "--staged")]
+    full, staged, want_json = ("--full" in argv), ("--staged" in argv), ("--json" in argv)
+    rev = argv[argv.index("--base") + 1] if "--base" in argv and argv.index("--base") + 1 < len(argv) else None
+    args = [a for i, a in enumerate(argv) if a not in ("--full", "--staged", "--json", "--base")
+            and not (i and argv[i - 1] == "--base")]
     if args:
         paths = [Path(a) for a in args]
     else:
@@ -224,7 +239,10 @@ def main(argv):
             print("Không phải git repo và không có file nào được chỉ định.", file=sys.stderr)
             return 0
         paths = changed_files(root, staged)
-    conv, version, warns = run(paths, full, staged)
+    conv, version, warns = run(paths, full, staged, rev)
+    if want_json:
+        print(json.dumps(as_json(conv, version, warns), ensure_ascii=False))
+        return 0
     if paths and not conv:
         print("Chưa có convention.md — copy convention.sample.md ở gốc plugin xora-dev về gốc repo thành convention.md, rồi sửa theo dự án.", file=sys.stderr)
         return 0

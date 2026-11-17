@@ -85,8 +85,13 @@ def check_kiro():
         assert srv["command"] == "xdlc" and srv["args"] == ["mcp"], role
         head = (d / "POWER.md").read_text().split("---")[1]
         assert f"name: xora-{role}\n" in head and f'mcpServers: ["xora-{role}"]' in head, role
-    for hook in (ROOT / "dev" / "kiro-hooks").glob("*.kiro.hook"):
-        assert "`xdlc sensor`" in json.loads(hook.read_text(encoding="utf-8"))["then"]["prompt"]
+    hooks = list((ROOT / "dev" / "kiro-hooks").glob("*"))
+    assert [h.name for h in hooks] == ["xora-dev-convention-sensor.json"], hooks  # Kiro CLI V3 chỉ nạp JSON v1
+    spec = json.loads(hooks[0].read_text(encoding="utf-8"))
+    hook = spec["hooks"][0]
+    assert spec["version"] == "v1" and hook["trigger"] == "PostFileSave" and hook["action"]["type"] == "agent", spec
+    assert "`xdlc sensor`" in hook["action"]["prompt"] and "convention.md" in hook["action"]["prompt"]
+    assert re.search(hook["matcher"], "src/A.java") and not re.search(hook["matcher"], "README.md")
 
 
 def check_xdlc():
@@ -99,7 +104,9 @@ def check_xdlc():
     version = re.search(r'^VERSION = "([^"]+)"', cli.read_text(), re.M).group(1)
     assert market["plugins"][0]["version"] == version, "VERSION trong xdlc phải khớp marketplace.json"
 
-    seen = {"mcp": []}
+    seen = {"mcp": [], "sensor": []}
+    steps = [{"work_order_id": "WO-1", "work_order_name": "Tích hợp eKYC", "step_id": "impl", "step_name": "Thực hiện"},
+             {"work_order_id": "WO-2", "work_order_name": "Chuyển tiền", "step_id": "impl", "step_name": "Thực hiện"}]
 
     class Backend(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a): pass
@@ -123,6 +130,9 @@ def check_xdlc():
             if u.path == "/oauth/userinfo":
                 if not self._auth(): return self._json(401, {"detail": "no"})
                 return self._json(200, {"sub": "u-1", "username": "dat.dev", "name": "Dat Dev", "role": "dev"})
+            if u.path == "/my-work":
+                if not self._auth(): return self._json(401, {"detail": "no"})
+                return self._json(200, {"steps_in_progress": steps, "questions_to_answer": [], "badge": 0})
             self._json(404, {})
         def do_POST(self):
             body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
@@ -132,6 +142,10 @@ def check_xdlc():
                     digest = base64.urlsafe_b64encode(hashlib.sha256(f["code_verifier"].encode()).digest()).rstrip(b"=").decode()
                     assert f["code"] == "c-1" and digest == seen["challenge"], f
                 return self._json(200, {"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600, "token_type": "Bearer"})
+            if self.path == "/governance/sensor-events":
+                if not self._auth(): return self._json(401, {"detail": "no"})
+                seen["sensor"].append(json.loads(body))
+                return self._json(201, {"received": len(seen["sensor"][-1]["findings"]), "alerts": []})
             if self.path == "/mcp/user":
                 if not self._auth(): return self._json(401, {"detail": "no"})
                 msg = json.loads(body); seen["mcp"].append(msg)
@@ -181,7 +195,7 @@ def check_xdlc():
         assert "Đã cài" in x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
         kiro = ws / ".kiro"
         assert (kiro / "skills" / "implement" / "SKILL.md").is_file() and (kiro / "steering" / "xora-dev.md").is_file()
-        assert (kiro / "hooks" / "convention-sensor.kiro.hook").is_file()
+        assert (kiro / "hooks" / "xora-dev-convention-sensor.json").is_file()
         servers = json.loads((kiro / "settings" / "mcp.json").read_text())["mcpServers"]
         entry = servers["xora-dev"]
         assert servers["postgres"] == {"command": "pg"} and entry["args"][-1] == "mcp"
@@ -254,6 +268,39 @@ def check_xdlc():
         assert resp[3]["result"]["content"][0]["text"] == "Việc của bạn: WO-1", resp[3]
         assert any(m.get("method") == "tools/call" and m["params"]["name"] == "xora_ask" for m in seen["mcp"]), seen
 
+        # pre-push: map work order cho nhánh (xdlc link), push thật lên remote bare, sensor gửi cảnh báo về backend
+        bare, pp = Path(tmp) / "pp.git", Path(tmp) / "pp"
+        g(Path(tmp), "init", "-q", "--bare", str(bare)); pp.mkdir(); g(pp, "init", "-q", "-b", "main")
+        g(pp, "remote", "add", "origin", str(bare))
+        rules = {"version": "1", "rules": [{"id": "LOG-001", "type": "forbid", "files": ["**/*.java"], "severity": "red",
+                                            "pattern": "System\\.out\\.println", "message": "In ra console", "fix": "dùng logger"}]}
+        (pp / "convention.md").write_text("```json\n" + json.dumps(rules) + "\n```\n", encoding="utf-8")
+        g(pp, "add", "."); g(pp, "commit", "-qm", "init")
+        out = x("setup", "--agent", "kiro", "--scope", "local", cwd=pp)
+        assert "pre-push" in out and "xdlc pre-push" in (pp / ".git" / "hooks" / "pre-push").read_text(), out
+        assert "WO-1 --step impl" in x("link", "--list", cwd=pp) and "chưa map" in x("status", cwd=pp)
+        assert "Đã map nhánh main → WO-1" in x("link", cwd=pp, inp="1\n")  # menu (gõ số khi không có terminal)
+        assert "Đã map nhánh main → WO-2" in x("link", "WO-2", cwd=pp)  # viết tắt, cho agent
+        assert "không có trong" in x("link", "WO-9", cwd=pp, ok=False)
+        assert "(trước: WO-2)" in x("link", "wo-1", cwd=pp) and "WO-1 · Tích hợp eKYC" in x("status", cwd=pp)
+        (pp / "A.java").write_text('class A { void a(){ System.out.println("x"); } }\n', encoding="utf-8")
+        g(pp, "add", "."); g(pp, "commit", "-qm", "a")
+        push = lambda *a: subprocess.run(["git", "-C", str(pp), "push", "-q", *a], env=env | {"XDLC_NO_TTY": "1"},
+                                         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        r = push("origin", "main")
+        assert r.returncode == 0 and "đã gửi 1 cảnh báo về Xora DLC (WO-1" in r.stdout + r.stderr, (r.stdout, r.stderr)
+        sent = seen["sensor"][-1]
+        assert (sent["work_order_id"], sent["step_id"], sent["commit"]) == ("WO-1", "impl", g(pp, "rev-parse", "HEAD").strip())
+        assert [(f["file"], f["line"], f["rule_code"], f["severity"]) for f in sent["findings"]] == [("A.java", 1, "LOG-001", "red")]
+        g(pp, "checkout", "-qb", "feature/x")  # nhánh chưa map, không có terminal: không gửi, vẫn push được
+        (pp / "B.java").write_text('class B { void b(){ System.out.println("y"); } }\n', encoding="utf-8")
+        g(pp, "add", "."); g(pp, "commit", "-qm", "b")
+        n = len(seen["sensor"]); r = push("origin", "feature/x")
+        assert r.returncode == 0 and "chưa map work order" in r.stdout + r.stderr and len(seen["sensor"]) == n, r.stdout + r.stderr
+        # Kiro Global: hook sensor vào ~/.kiro/hooks; nhắc xdlc link cho pre-push
+        out = x("setup", "--agent", "kiro", "--scope", "global")
+        assert "xdlc link" in out and (home / ".kiro" / "hooks" / "xora-dev-convention-sensor.json").is_file(), out
+
         # version, update (từ bản clone), remove, logout, uninstall
         assert f"xdlc {version}" in x("version")
         check_claude_bundle(home, xdlc)
@@ -265,6 +312,7 @@ def check_xdlc():
         assert "Đã gỡ Xora DLC" in x("uninstall", inp="y\n")
         assert not (home / ".xdlc").exists() and not xdlc.exists()
         assert not (lr / ".kiro").exists() and "xdlc" not in (lr / ".git" / "info" / "exclude").read_text()
+        assert not (pp / ".git" / "hooks" / "pre-push").exists() and not (home / ".kiro" / "hooks").exists()
     srv.shutdown()
 
 

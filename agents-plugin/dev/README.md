@@ -25,10 +25,11 @@ Plugin cho vai Developer, chạy trên Claude Code và Kiro.
 | Môi trường | Sensor chạy khi | Kiểm |
 |---|---|---|
 | Claude Code | Hook `PostToolUse` sau `Write`, `Edit`, `MultiEdit` gọi `xdlc sensor --hook claude` | File vừa sửa |
-| Kiro | Hook `fileEdited` (`.java`, `.ts`, `.py`, `.yml`, …): Kiro nhắc agent chạy `xdlc sensor` | Các file đang đổi trong git |
+| Kiro | Hook `PostFileSave` (`.java`, `.ts`, `.py`, `.yml`, …): Kiro nhắc agent chạy `xdlc sensor` | Các file đang đổi trong git |
 | Git pre-commit (dự án tự gắn) | Developer commit: `xdlc sensor --staged` | Phần đã staged |
+| Git pre-push (`xdlc` cài) | Developer push: `xdlc sensor --pre-push`, rồi gửi về Xora DLC | File thay đổi so với remote |
 
-Kiro chỉ chạy hook theo workspace, nên sensor của Kiro có ở scope `local`, không có ở `global`.
+Hook của Kiro là file JSON v1 (`PostFileSave`, action `agent`): scope local ở `.kiro/hooks/`, scope global ở `~/.kiro/hooks/` (chạy ở mọi workspace; lời nhắc chỉ cho agent chạy sensor khi repo có `convention.md`).
 
 ## Sensor cảnh báo dev qua đâu
 
@@ -44,7 +45,7 @@ Sensor in kết quả ra stdout. Dev thấy gì là do công cụ đang chạy s
 | Môi trường | Cơ chế | Dev thấy | Agent nhận |
 |---|---|---|---|
 | Claude Code | Hook `PostToolUse`. Sensor trả JSON gồm `systemMessage` và `additionalContext` | Dòng tóm tắt trong khung chat | Toàn bộ danh sách, vào ngữ cảnh |
-| Kiro | Hook `fileEdited` (`askAgent`). Agent chạy `xdlc sensor` bằng shell và đọc stdout | Những gì agent báo lại trong chat | Toàn bộ stdout |
+| Kiro | Hook `PostFileSave` (action `agent`). Agent chạy `xdlc sensor` bằng shell và đọc stdout | Những gì agent báo lại trong chat | Toàn bộ stdout |
 | Pre-commit / chạy tay | Chạy trực tiếp trong terminal | Toàn bộ danh sách | — |
 
 Sensor chỉ cảnh báo, không chặn gì: luôn thoát với mã 0, kể cả khi có cảnh báo. Sau khi nhận cảnh báo, agent tự sửa vi phạm trong phần code mình vừa sinh, và liệt kê cho dev những vi phạm nằm ở code cũ.
@@ -54,12 +55,14 @@ Sensor chỉ cảnh báo, không chặn gì: luôn thoát với mã 0, kể cả
 - Chưa hiện cảnh báo trong editor hay trong panel Problems.
 - Dev tự sửa code trong editor thì không có cảnh báo, trừ khi dự án đã gắn pre-commit.
 
-## Gửi cảnh báo về Xora DLC (chưa làm)
+## Gửi cảnh báo về Xora DLC
 
-Hiện sensor chỉ in cảnh báo trên máy dev; Xora DLC (màn hình Governance) không thấy.
+Hook git `pre-push` (`xdlc sensor --pre-push`) gửi cảnh báo về `POST /governance/sensor-events`; backend ghi mỗi cảnh báo thành một governance alert của vai Dev ở bước đã map.
 
-Backend đã có `POST /governance/sensor-events`: nhận một lần chạy sensor (`work_order_id`, `step_id` mặc định `impl`, máy, phiên, repo, commit, danh sách cảnh báo: file, dòng, mã luật, mức, nội dung, thời điểm; không có nội dung dòng code) và ghi thành governance alert của vai Dev ở bước đó. Plugin chưa gọi vì còn ba chỗ hở:
+1. Mỗi nhánh được push: tính các file thay đổi so với commit đã có trên remote (nhánh mới: so với nhánh mặc định của remote, không có thì commit trước đó), chạy sensor với `--base <commit đó> --json`.
+2. Repo không có `convention.md`: không kiểm, không gửi.
+3. Tìm work order đã map với (URL `origin`, nhánh) bằng `xdlc link`. Chưa map: hỏi trên terminal (menu Việc của tôi), không có terminal thì bỏ qua lần gửi.
+4. Gửi bằng token OAuth của `xdlc login`: work order, bước, máy, repo, commit, và mỗi cảnh báo (file, dòng, mã luật, mức, nội dung, thời điểm). Không gửi nội dung dòng code.
+5. Backend chỉ nhận khi người đăng nhập là Dev của work order đó (403 nếu không: chọn lại bằng `xdlc link`).
 
-- **Xác thực:** endpoint nhận key `sensor` (`xmcp_…`, admin cấp riêng cho từng dev), không nhận token OAuth mà `xdlc login` giữ. Cần backend nhận thêm token đó (người gửi là người đăng nhập), để dev không phải xin thêm key.
-- **Work order:** mỗi lần gửi phải có `work_order_id`, nhưng sensor không biết repo / nhánh đang làm thuộc work order nào. Cần quy ước (vd. ghi mã WO trong cấu hình repo hay tên nhánh) hoặc `xdlc` hỏi một lần rồi nhớ.
-- **Quyền:** backend chỉ nhận khi người gửi là Dev được giao của work order đó; gửi sai work order sẽ bị từ chối.
+Luôn thoát mã 0: hook không bao giờ chặn push. `git push --no-verify` bỏ qua hook (chấp nhận). Chưa có: gộp alert trùng giữa các lần push và tự đóng alert khi lỗi đã sửa.

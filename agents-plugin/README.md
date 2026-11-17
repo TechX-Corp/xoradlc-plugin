@@ -78,6 +78,7 @@ Cách dùng: xdlc <lệnh> [tuỳ chọn]
 Lệnh:
   setup      Cài plugin xora-dev cho Kiro CLI hoặc Claude Code
   remove     Gỡ một hay nhiều lần setup
+  link       Chọn work order cho nhánh hiện tại (sensor gửi cảnh báo khi git push)
   login      Đăng nhập Xora DLC (mở trình duyệt)
   logout     Đăng xuất Xora DLC trên máy này
   status     Backend, tài khoản và vai đang đăng nhập, nơi đã setup
@@ -89,6 +90,7 @@ Lệnh:
 Viết tắt (bỏ qua câu hỏi trên terminal):
   xdlc setup --agent kiro|claude --scope global|local
   xdlc remove --agent kiro|claude
+  xdlc link [WO-… [--step …]] [--branch …] [--list]
   xdlc use prod | xdlc use local [--url URL]
 
 Scope: global = mọi repo trên máy; local = project hiện tại, git không theo dõi file của xdlc.
@@ -115,9 +117,15 @@ Sau mỗi lần agent ghi / sửa code, sensor kiểm các **dòng vừa đổi*
 - Tạo `convention.md`: copy `convention.sample.md` của plugin về gốc repo rồi sửa cho khớp dự án. Chưa có file này thì sensor không kiểm gì.
   - macOS / Linux: `cp ~/.xdlc/plugin/agents-plugin/dev/convention.sample.md convention.md`
   - Windows: `Copy-Item $HOME\.xdlc\plugin\agents-plugin\dev\convention.sample.md .\convention.md`
-- Luật `forbid` chỉ báo trên dòng đã đổi so với HEAD; `--full` để rà cả code cũ.
+- Luật `forbid` chỉ báo trên dòng đã đổi so với HEAD; `--full` để rà cả code cũ. Mỗi luật có thể thêm `"severity": "red"` (mặc định `yellow`): mức của alert trên Xora DLC.
 - Chạy tay / pre-commit: `xdlc sensor [file …] [--staged] [--full]` (`--staged` cho git pre-commit). CI không có `xdlc`: `python3 agents-plugin/dev/sensor/convention_sensor.py …` từ bản clone.
 - Bỏ qua một dòng: `convention-ignore: <ID> <lý do>`.
+
+**Gửi cảnh báo về Xora DLC khi `git push`** (màn hình Governance, vai Dev):
+
+1. Hook git `pre-push` của `xdlc`: setup **local** cài sẵn; setup **global** thì chạy `xdlc link` trong repo (lệnh này cài hook cho repo đó). Repo dùng `core.hooksPath` (husky, …) hoặc đã có hook `pre-push` riêng: `xdlc` không ghi đè, chỉ in dòng lệnh để bạn thêm vào hook của repo.
+2. Map nhánh với work order: `xdlc link` (menu các bước bạn đang làm, lấy từ Việc của tôi), hoặc `xdlc link WO-2026-001 [--step impl]`. Lần push đầu của một nhánh chưa map, hook hỏi ngay trên terminal; push từ nơi không có terminal (git GUI) thì bỏ qua lần gửi đó. Map theo URL `origin` + tên nhánh, dùng chung cho mọi bản clone; xem bằng `xdlc status` hoặc `xdlc link --list`.
+3. Khi push, sensor kiểm các file thay đổi so với commit đã có trên remote, in cảnh báo, rồi gửi về Xora DLC bằng token của `xdlc login`. Không bao giờ chặn push: chưa đăng nhập, mất mạng, không phải Dev của work order… đều chỉ in lý do. `git push --no-verify` bỏ qua hook.
 
 ## Kiểm tra trước khi mở PR
 
@@ -126,4 +134,5 @@ Sau mỗi lần agent ghi / sửa code, sensor kiểm các **dòng vừa đổi*
 ## Còn để ngỏ
 
 - Câu hỏi qua Xora DLC tối đa 3.800 ký tự (giới hạn `question` của backend), nên `upload-tech-doc` chỉ lưu được tài liệu ngắn hoặc phải tách phần.
-- Sensor chỉ báo cho agent và dev trên máy, chưa gửi cảnh báo về Xora DLC: backend đã có `POST /governance/sensor-events` nhưng plugin chưa gọi (xem [dev/README.md](dev/README.md#gửi-cảnh-báo-về-xora-dlc-chưa-làm)).
+- Mỗi lần push gửi lại mọi cảnh báo còn lại: backend chưa gộp alert trùng giữa các lần gửi, cũng chưa tự đóng alert khi lỗi đã sửa.
+- Pre-push kiểm bản trong thư mục làm việc của các file thay đổi (thay đổi chưa commit cũng tính), không phải đúng bản trong commit được push.

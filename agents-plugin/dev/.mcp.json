@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "xora-dev": {
-      "type": "http",
-      "url": "${XORA_URL:-https://xoradlc-platform-api.techxcorp.com}/mcp/user",
-      "oauth": {
-        "clientId": "xora-plugin"
-      }
+      "command": "sh",
+      "args": ["-c", "exec \"${XDLC_BIN_DIR:-$HOME/.local/bin}/xdlc\" mcp"]
     }
   }
 }

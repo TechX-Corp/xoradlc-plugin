@@ -9,7 +9,7 @@ Plugin cho vai Developer, chạy trên Claude Code và Kiro.
 | Viết / sửa code, cấu hình, migration, test theo BRD và thiết kế đã duyệt | Skill `implement` |
 | Lập hoặc rà hồ sơ changeset (mô tả PR), ghi rõ phần do AI sinh | Skill `changeset` |
 | Lưu tài liệu kỹ thuật vào KB / S3 qua agent AAP, sau khi người dùng xác nhận | Skill `upload-tech-doc` |
-| Hỏi Xora DLC (việc của tôi, work order, tài liệu, open question) và KB nội bộ (convention, tiền lệ), có trích dẫn; AAP tự chọn function MCP của Xora DLC. Đăng nhập OAuth, không key | MCP `xora-dev`, tool `xora_ask` |
+| Hỏi Xora DLC (việc của tôi, work order, tài liệu, open question) và KB nội bộ (convention, tiền lệ), có trích dẫn; AAP tự chọn function MCP của Xora DLC. Đăng nhập bằng `xdlc login`, không key | MCP `xora-dev`, tool `xora_ask` |
 | Kiểm code theo `convention.md` của dự án và cảnh báo vi phạm | Sensor convention |
 
 ## Sensor lắng nghe gì

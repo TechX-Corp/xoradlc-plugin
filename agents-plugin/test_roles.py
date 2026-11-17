@@ -189,16 +189,16 @@ def check_xdlc():
         assert xdlc.is_file()
         assert "setup" in x() and "uninstall" in x() and "--agent" in x("setup", "--help")
         readme = (ROOT / "README.md").read_text(encoding="utf-8").split("```text\n", 1)[1].split("\n```", 1)[0]
-        assert x().rstrip("\n") == readme, "README (mục Các lệnh) phải khớp đúng output của `xdlc`"
-        assert "không có lệnh" in x("nope", ok=False)
+        assert x().rstrip("\n") == readme, "README Commands section must match `xdlc` output exactly"
+        assert "unknown command" in x("nope", ok=False)
 
         # setup Kiro Local ở ws (không phải git repo; đã có server và skill riêng của team).
         ws = Path(tmp) / "ws"; (ws / ".kiro" / "settings").mkdir(parents=True)
         (ws / ".kiro" / "settings" / "mcp.json").write_text(json.dumps({"mcpServers": {"postgres": {"command": "pg"}}}), encoding="utf-8")
         (ws / ".kiro" / "skills" / "deploy-guide").mkdir(parents=True)
         (ws / ".kiro" / "skills" / "deploy-guide" / "SKILL.md").write_text("team", encoding="utf-8")
-        assert "global hoặc local" in x("setup", "--agent", "kiro", "--scope", "project", cwd=ws, ok=False)
-        assert "Đã cài" in x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
+        assert "global or local" in x("setup", "--agent", "kiro", "--scope", "project", cwd=ws, ok=False)
+        assert "Installed" in x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
         kiro = ws / ".kiro"
         assert (kiro / "skills" / "implement" / "SKILL.md").is_file() and (kiro / "steering" / "xora-dev.md").is_file()
         assert (kiro / "hooks" / "xora-dev-convention-sensor.json").is_file()
@@ -217,8 +217,8 @@ def check_xdlc():
         r = subprocess.run([sys.executable, str(xdlc), "sensor"], cwd=ws, env=env, capture_output=True, text=True, encoding="utf-8")
         assert r.returncode == 0, r.stdout + r.stderr
         assert (home / ".xdlc" / "plugin" / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py").is_file()
-        assert "Đã cài lại" in x("setup", "--agent=kiro", "--scope=local", cwd=ws)
-        assert "Đã cài lại" in x("setup", "-a", "kiro", "-s", "local", cwd=ws)  # tuỳ chọn ngắn
+        assert "Reinstalled" in x("setup", "--agent=kiro", "--scope=local", cwd=ws)
+        assert "Reinstalled" in x("setup", "-a", "kiro", "-s", "local", cwd=ws)  # tuỳ chọn ngắn
         assert "-a, --agent" in x("setup", "-a", "kiro", "-x", "y", cwd=ws, ok=False)
         assert len(json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"]) == 1, "setup lại không tạo mục trùng"
 
@@ -238,7 +238,7 @@ def check_xdlc():
             (r / ".kiro" / "settings" / "mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
             g(r, "add", "."); g(r, "commit", "-qm", "team")
             out = x("setup", "--agent", "kiro", "--scope", "local", cwd=r, inp=answer + "\n")
-            assert ".kiro/settings/mcp.json" in out and "đã được git theo dõi" in out, out
+            assert ".kiro/settings/mcp.json" in out and "already tracked by git" in out, out
             tracked = g(r, "ls-files", ".kiro")
             if answer == "1":
                 assert tracked == "" and "/.kiro/settings/mcp.json" in (r / ".git" / "info" / "exclude").read_text(encoding="utf-8")
@@ -246,11 +246,11 @@ def check_xdlc():
             else:
                 assert tracked.strip() == ".kiro/settings/mcp.json"
                 assert g(r, "status", "--porcelain").strip() == "M .kiro/settings/mcp.json", "giữ: git thấy khối xora-dev"
-        assert "Đã cài lại" in x("setup", "--agent", "kiro", "--scope", "local", cwd=Path(tmp) / "tk"), "lần sau nhớ lựa chọn, không hỏi lại"
+        assert "Reinstalled" in x("setup", "--agent", "kiro", "--scope", "local", cwd=Path(tmp) / "tk"), "lần sau nhớ lựa chọn, không hỏi lại"
 
         # login OAuth (backend giả), status, MCP proxy
         x("use", "local", "-u", f"http://127.0.0.1:{srv.server_port}")
-        assert "chỉ dùng với local" in x("use", "prod", "-u", "http://x", ok=False) and "chỉ dùng với local" in x("use", "prod", "--url", "http://x", ok=False)
+        assert "only for local" in x("use", "prod", "-u", "http://x", ok=False) and "only for local" in x("use", "prod", "--url", "http://x", ok=False)
         mcp_in = "\n".join(json.dumps(m) for m in (
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
@@ -258,14 +258,14 @@ def check_xdlc():
         resp = {r["id"]: r for r in map(json.loads, x("mcp", inp=mcp_in).splitlines())}
         assert resp[1]["result"]["serverInfo"]["name"] == "xoradlc" and resp[2]["result"]["tools"][0]["name"] == "xora_ask"
         assert resp[3]["result"]["isError"] and "xdlc login" in resp[3]["result"]["content"][0]["text"], resp[3]
-        assert "chưa đăng nhập" in x("status")
+        assert "not logged in" in x("status")
 
         p = subprocess.Popen([sys.executable, str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, encoding="utf-8")
         url = next(l for l in p.stdout if l.startswith("http"))
         urllib.request.urlopen(url.strip(), timeout=10).read()  # "trình duyệt": authorize → loopback callback
         rest = p.stdout.read(); assert p.wait(timeout=30) == 0, rest
-        assert "Đã đăng nhập: Dat Dev (dat.dev) · vai DEV" in rest, rest
+        assert "Signed in: Dat Dev (dat.dev) · role DEV" in rest, rest
         auth = json.loads((home / ".xdlc" / "auth.json").read_text(encoding="utf-8"))
         if WIN:  # DPAPI: file không chứa token dạng rõ
             assert list(auth) == ["dpapi"] and "at-1" not in json.dumps(auth), auth
@@ -287,17 +287,17 @@ def check_xdlc():
         g(pp, "add", "."); g(pp, "commit", "-qm", "init")
         out = x("setup", "--agent", "kiro", "--scope", "local", cwd=pp)
         assert "pre-push" in out and "xdlc pre-push" in (pp / ".git" / "hooks" / "pre-push").read_text(encoding="utf-8"), out
-        assert "WO-1 --step impl" in x("link", "-l", cwd=pp) and "chưa map" in x("status", cwd=pp)
-        assert "Đã map nhánh main → WO-1" in x("link", cwd=pp, inp="1\n")  # menu (gõ số khi không có terminal)
-        assert "Đã map nhánh main → WO-2" in x("link", "WO-2", "-t", "impl", "-b", "main", cwd=pp)  # viết tắt, cho agent
-        assert "không có trong" in x("link", "WO-9", cwd=pp, ok=False)
-        assert "(trước: WO-2)" in x("link", "wo-1", cwd=pp) and "WO-1 · Tích hợp eKYC" in x("status", cwd=pp)
+        assert "WO-1 --step impl" in x("link", "-l", cwd=pp) and "no work order mapped" in x("status", cwd=pp)
+        assert "Mapped branch main → WO-1" in x("link", cwd=pp, inp="1\n")  # menu (gõ số khi không có terminal)
+        assert "Mapped branch main → WO-2" in x("link", "WO-2", "-t", "impl", "-b", "main", cwd=pp)  # viết tắt, cho agent
+        assert "is not among" in x("link", "WO-9", cwd=pp, ok=False)
+        assert "(was: WO-2)" in x("link", "wo-1", cwd=pp) and "WO-1 · Tích hợp eKYC" in x("status", cwd=pp)
         (pp / "A.java").write_text('class A { void a(){ System.out.println("x"); } }\n', encoding="utf-8")
         g(pp, "add", "."); g(pp, "commit", "-qm", "a")
         push = lambda *a: subprocess.run(["git", "-C", str(pp), "push", "-q", *a], env=env | {"XDLC_NO_TTY": "1"},
                                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         r = push("origin", "main")
-        assert r.returncode == 0 and "đã gửi 1 cảnh báo về Xora DLC (WO-1" in r.stdout + r.stderr, (r.stdout, r.stderr)
+        assert r.returncode == 0 and "sent 1 alert(s) to Xora DLC (WO-1" in r.stdout + r.stderr, (r.stdout, r.stderr)
         sent = seen["sensor"][-1]
         assert (sent["work_order_id"], sent["step_id"], sent["commit"]) == ("WO-1", "impl", g(pp, "rev-parse", "HEAD").strip())
         assert [(f["file"], f["line"], f["rule_code"], f["severity"]) for f in sent["findings"]] == [("A.java", 1, "LOG-001", "red")]
@@ -305,7 +305,7 @@ def check_xdlc():
         (pp / "B.java").write_text('class B { void b(){ System.out.println("y"); } }\n', encoding="utf-8")
         g(pp, "add", "."); g(pp, "commit", "-qm", "b")
         n = len(seen["sensor"]); r = push("origin", "feature/x")
-        assert r.returncode == 0 and "chưa map work order" in r.stdout + r.stderr and len(seen["sensor"]) == n, r.stdout + r.stderr
+        assert r.returncode == 0 and "has no work order mapped" in r.stdout + r.stderr and len(seen["sensor"]) == n, r.stdout + r.stderr
         # Kiro Global: hook sensor vào ~/.kiro/hooks; nhắc xdlc link cho pre-push
         out = x("setup", "--agent", "kiro", "--scope", "global")
         assert "xdlc link" in out and (home / ".kiro" / "hooks" / "xora-dev-convention-sensor.json").is_file(), out
@@ -314,12 +314,12 @@ def check_xdlc():
         assert f"xdlc {version}" in x("--version") and f"xdlc {version}" in x("-v")
         assert "  version " not in x() and "-v, --version" in x()
         check_claude_bundle(home, xdlc)
-        assert "Đã cập nhật" in x("update")
-        assert "Đã gỡ" in x("remove", "--agent", "kiro", cwd=ws, inp="1\ny\n")
+        assert "Updated" in x("update")
+        assert "Removed" in x("remove", "--agent", "kiro", cwd=ws, inp="1\n2\n")  # 1 = item to remove, 2 = Yes
         assert not (kiro / "skills" / "implement").exists() and (kiro / "skills" / "deploy-guide" / "SKILL.md").is_file()
         assert json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {"postgres": {"command": "pg"}}
-        assert "Đã đăng xuất" in x("logout") and "chưa đăng nhập" in x("status")
-        assert "Đã gỡ Xora DLC" in x("uninstall", inp="y\n")
+        assert "Logged out" in x("logout") and "not logged in" in x("status")
+        assert "Removed Xora DLC" in x("uninstall", inp="2\n")  # 2 = Yes
         assert not (home / ".xdlc").exists() and not xdlc.exists()
         assert not (lr / ".kiro").exists() and "xdlc" not in (lr / ".git" / "info" / "exclude").read_text(encoding="utf-8")
         assert not (pp / ".git" / "hooks" / "pre-push").exists() and not (home / ".kiro" / "hooks").exists()
@@ -389,14 +389,14 @@ def check_menu():
         down, enter = "\x1b[B", "\r"
         for name in ("a", "b"):
             (Path(tmp) / name).mkdir()
-            code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter chọn", down + enter)], Path(tmp) / name, env)
-            assert code == 0 and "› Local" in out and "Đã cài" in out, out
+            code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter select", down + enter)], Path(tmp) / name, env)
+            assert code == 0 and "› Local" in out and "Installed" in out, out
             assert (Path(tmp) / name / ".kiro" / "skills" / "implement" / "SKILL.md").is_file()
-        code, out = pty_run([cli, "remove"], [("Enter xác nhận", "\x1b")], Path(tmp) / "a", env)
-        assert code == 0 and "Đã huỷ" in out and (Path(tmp) / "a" / ".kiro").is_dir(), out
-        code, out = pty_run([cli, "remove"], [("Enter xác nhận", enter), ("Chưa chọn mục nào", " " + down + " " + enter),
-                                               ("[y/N]", "y" + enter)], Path(tmp) / "a", env)
-        assert code == 0 and out.count("Đã gỡ") == 2, out
+        code, out = pty_run([cli, "remove"], [("Enter confirm", "\x1b")], Path(tmp) / "a", env)
+        assert code == 0 and "Cancelled" in out and (Path(tmp) / "a" / ".kiro").is_dir(), out
+        code, out = pty_run([cli, "remove"], [("Enter confirm", enter), ("Nothing selected", " " + down + " " + enter),
+                                               ("Continue?", down + enter)], Path(tmp) / "a", env)
+        assert code == 0 and out.count("Removed") == 2, out
         assert not (Path(tmp) / "a" / ".kiro").exists() and not (Path(tmp) / "b" / ".kiro").exists()
         assert json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"] == []
 

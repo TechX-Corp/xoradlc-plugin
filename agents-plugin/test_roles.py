@@ -8,16 +8,16 @@ WIN = os.name == "nt"  # các vai khác ở archived/, không kiểm
 
 
 def main():
-    market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
+    market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     assert sorted(p["name"] for p in market["plugins"]) == sorted(f"xora-{r}" for r in ROLES)
     for role in ROLES:
         d = ROOT / role
         manifest = d / ".claude-plugin" / "plugin.json"  # tuỳ chọn: thiếu thì Claude Code lấy tên từ marketplace
-        assert not manifest.is_file() or json.loads(manifest.read_text())["name"] == f"xora-{role}"
-        server = json.loads((d / ".mcp.json").read_text())["mcpServers"][f"xora-{role}"]
+        assert not manifest.is_file() or json.loads(manifest.read_text(encoding="utf-8"))["name"] == f"xora-{role}"
+        server = json.loads((d / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"][f"xora-{role}"]
         # MCP server cục bộ `xdlc mcp`: xdlc giữ token đăng nhập và chuyển tới <backend>/mcp/user.
         assert server["args"][-1].endswith("/xdlc\" mcp"), server
-        hooks = json.loads((d / "hooks" / "hooks.json").read_text())
+        hooks = json.loads((d / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         for cmd in (h["command"] for g in hooks["hooks"].values() for e in g for h in e["hooks"]):
             for f in re.findall(r'\$\{CLAUDE_PLUGIN_ROOT\}/([^"\s]+)', cmd):
                 assert (d / f).is_file(), f"{role}: hook trỏ tới file không có: {f}"
@@ -25,7 +25,7 @@ def main():
         skills = list((d / "skills").glob("*/SKILL.md"))
         assert skills, f"{role}: no skills"
         for s in skills:
-            head = s.read_text().split("---")[1]
+            head = s.read_text(encoding="utf-8").split("---")[1]
             assert f"name: {s.parent.name}\n" in head and "description: " in head, s
 
     check_sensor()
@@ -43,11 +43,11 @@ def check_sensor():
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         bad = repo / "A.java"
         bad.write_text('class A { void a(){ System.out.println("x"); }\n'
-                       '  String k = "abcdef123"; // convention-ignore: SEC-001 demo\n}\n')
-        hook = lambda: subprocess.run([sys.executable, str(sensor), "--hook", "claude"], capture_output=True, text=True,
+                       '  String k = "abcdef123"; // convention-ignore: SEC-001 demo\n}\n', encoding="utf-8")
+        hook = lambda: subprocess.run([sys.executable, str(sensor), "--hook", "claude"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                                       input=json.dumps({"cwd": str(repo), "tool_input": {"file_path": str(bad)}})).stdout
         assert hook() == "", "chưa có convention.md thì sensor phải im lặng"
-        (repo / "convention.md").write_text((ROOT / "dev" / "convention.sample.md").read_text())
+        (repo / "convention.md").write_text((ROOT / "dev" / "convention.sample.md").read_text(encoding="utf-8"), encoding="utf-8")
         ctx = json.loads(hook())["hookSpecificOutput"]["additionalContext"]
         assert "[LOG-001]" in ctx and "SEC-001" not in ctx.split("\n- ", 1)[1], ctx
 
@@ -55,21 +55,21 @@ def check_sensor():
         g = lambda *a: subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a],
                                       check=True, capture_output=True)
         g("add", "."); g("commit", "-qm", "init")
-        cli = lambda *a: subprocess.run([sys.executable, str(sensor), *a], cwd=repo, capture_output=True, text=True).stdout
-        bad.write_text(bad.read_text()[:-2] + "} // end\n")  # chỉ sửa dòng 3
+        cli = lambda *a: subprocess.run([sys.executable, str(sensor), *a], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+        bad.write_text(bad.read_text(encoding="utf-8")[:-2] + "} // end\n", encoding="utf-8")  # chỉ sửa dòng 3
         assert hook() == "", "chỉ sửa dòng khác (dòng 1 đã có vi phạm cũ) thì không báo code cũ"
         assert "[LOG-001]" in cli("--full", str(bad))
-        bad.write_text(bad.read_text() + 'class B { void b(){ System.out.println("y"); } }\n')
+        bad.write_text(bad.read_text(encoding="utf-8") + 'class B { void b(){ System.out.println("y"); } }\n', encoding="utf-8")
         assert "A.java:4 [LOG-001]" in cli(), "dòng mới thêm phải bị báo"
         assert "[LOG-001]" not in cli("--staged"), "chưa staged thì --staged không báo"
         g("add", "A.java")
-        bad.write_text("\n\n" + bad.read_text())  # sửa thêm sau khi staged: số dòng working tree lệch với index
+        bad.write_text("\n\n" + bad.read_text(encoding="utf-8"), encoding="utf-8")  # sửa thêm sau khi staged: số dòng working tree lệch với index
         assert "A.java:4 [LOG-001]" in cli("--staged"), "--staged phải đọc bản trong index"
 
         # Chỉ cảnh báo, không chặn: có vi phạm hay convention.md hỏng thì vẫn exit 0.
         code = lambda *a: subprocess.run([sys.executable, str(sensor), *a], cwd=repo, capture_output=True).returncode
         assert code() == 0, "có cảnh báo vẫn phải exit 0"
-        (repo / "convention.md").write_text("```json\n{\"rules\": [\n```\n")
+        (repo / "convention.md").write_text("```json\n{\"rules\": [\n```\n", encoding="utf-8")
         assert code() == 0 and "lỗi" in json.loads(hook())["systemMessage"], "convention.md hỏng vẫn không chặn"
 
 
@@ -81,9 +81,9 @@ def check_kiro():
     assert not dup, f"Kiro gom mọi skill vào .kiro/skills, tên skill phải khác nhau giữa các vai: {dup}"
     for role in ROLES:
         d = ROOT / role
-        srv = json.loads((d / "mcp.json").read_text())["mcpServers"][f"xora-{role}"]
+        srv = json.loads((d / "mcp.json").read_text(encoding="utf-8"))["mcpServers"][f"xora-{role}"]
         assert srv["command"] == "xdlc" and srv["args"] == ["mcp"], role
-        head = (d / "POWER.md").read_text().split("---")[1]
+        head = (d / "POWER.md").read_text(encoding="utf-8").split("---")[1]
         assert f"name: xora-{role}\n" in head and f'mcpServers: ["xora-{role}"]' in head, role
     hooks = list((ROOT / "dev" / "kiro-hooks").glob("*"))
     assert [h.name for h in hooks] == ["xora-dev-convention-sensor.json"], hooks  # Kiro CLI V3 chỉ nạp JSON v1
@@ -100,8 +100,8 @@ def check_xdlc():
     import http.server, threading, base64, hashlib, urllib.parse, urllib.request
     repo = ROOT.parent
     cli = repo / "xdlc"
-    market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
-    version = re.search(r'^VERSION = "([^"]+)"', cli.read_text(), re.M).group(1)
+    market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    version = re.search(r'^VERSION = "([^"]+)"', cli.read_text(encoding="utf-8"), re.M).group(1)
     assert market["plugins"][0]["version"] == version, "VERSION trong xdlc phải khớp marketplace.json"
 
     seen = {"mcp": [], "sensor": []}
@@ -173,30 +173,30 @@ def check_xdlc():
             r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(repo / "install.ps1")],
                                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
             assert r.returncode == 0 and f"xdlc {version}" in r.stdout, r.stdout + r.stderr
-            shim = (home / "bin" / "xdlc.cmd").read_text()
+            shim = (home / "bin" / "xdlc.cmd").read_text(encoding="utf-8")
             assert shim.startswith("@echo off") and '"%~dp0xdlc.py" %*' in shim, shim
             assert f"xdlc {version}" in subprocess.run([str(home / "bin" / "xdlc.cmd"), "--version"], env=env,
                                                        capture_output=True, text=True, encoding="utf-8").stdout
         else:
-            out = subprocess.run(["sh", str(repo / "install.sh")], env=env, capture_output=True, text=True, check=True).stdout
+            out = subprocess.run(["sh", str(repo / "install.sh")], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True).stdout
             assert os.access(xdlc, os.X_OK) and f"xdlc {version}" in out, out
         assert xdlc.is_file()
         assert "setup" in x() and "uninstall" in x() and "--agent" in x("setup", "--help")
-        readme = (ROOT / "README.md").read_text().split("```text\n", 1)[1].split("\n```", 1)[0]
+        readme = (ROOT / "README.md").read_text(encoding="utf-8").split("```text\n", 1)[1].split("\n```", 1)[0]
         assert x().rstrip("\n") == readme, "README (mục Các lệnh) phải khớp đúng output của `xdlc`"
         assert "không có lệnh" in x("nope", ok=False)
 
         # setup Kiro Local ở ws (không phải git repo; đã có server và skill riêng của team).
         ws = Path(tmp) / "ws"; (ws / ".kiro" / "settings").mkdir(parents=True)
-        (ws / ".kiro" / "settings" / "mcp.json").write_text(json.dumps({"mcpServers": {"postgres": {"command": "pg"}}}))
+        (ws / ".kiro" / "settings" / "mcp.json").write_text(json.dumps({"mcpServers": {"postgres": {"command": "pg"}}}), encoding="utf-8")
         (ws / ".kiro" / "skills" / "deploy-guide").mkdir(parents=True)
-        (ws / ".kiro" / "skills" / "deploy-guide" / "SKILL.md").write_text("team")
+        (ws / ".kiro" / "skills" / "deploy-guide" / "SKILL.md").write_text("team", encoding="utf-8")
         assert "global hoặc local" in x("setup", "--agent", "kiro", "--scope", "project", cwd=ws, ok=False)
         assert "Đã cài" in x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
         kiro = ws / ".kiro"
         assert (kiro / "skills" / "implement" / "SKILL.md").is_file() and (kiro / "steering" / "xora-dev.md").is_file()
         assert (kiro / "hooks" / "xora-dev-convention-sensor.json").is_file()
-        servers = json.loads((kiro / "settings" / "mcp.json").read_text())["mcpServers"]
+        servers = json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         entry = servers["xora-dev"]
         assert servers["postgres"] == {"command": "pg"} and entry["args"][-1] == "mcp"
         if WIN:  # Windows không chạy thẳng file .py: py -3 / python <xdlc.py> mcp
@@ -212,14 +212,14 @@ def check_xdlc():
         assert r.returncode == 0, r.stdout + r.stderr
         assert (home / ".xdlc" / "plugin" / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py").is_file()
         assert "Đã cài lại" in x("setup", "--agent=kiro", "--scope=local", cwd=ws)
-        assert len(json.loads((home / ".xdlc" / "installs.json").read_text())["installs"]) == 1, "setup lại không tạo mục trùng"
+        assert len(json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"]) == 1, "setup lại không tạo mục trùng"
 
         g = lambda repo, *a: subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a],
-                                           capture_output=True, text=True, check=True).stdout
+                                           capture_output=True, text=True, encoding="utf-8", errors="replace", check=True).stdout
         # Local trong git repo, hỏi scope trên terminal: git không thấy file của xdlc.
         lr = Path(tmp) / "lr"; lr.mkdir(); g(lr, "init", "-q")
         assert "Global" in x("setup", "--agent", "kiro", cwd=lr, inp="2\n")
-        exclude = (lr / ".git" / "info" / "exclude").read_text()
+        exclude = (lr / ".git" / "info" / "exclude").read_text(encoding="utf-8")
         assert "/.kiro/skills/implement/SKILL.md" in exclude and "/.kiro/settings/mcp.json" in exclude, exclude
         assert g(lr, "status", "--porcelain") == "", "Local: git không thấy file"
         assert "terminal" in x("setup", "--agent", "kiro", cwd=lr, inp="", ok=False), "không có terminal thì không tự đoán"
@@ -227,13 +227,13 @@ def check_xdlc():
         # mcp.json đã được team commit: chọn "gỡ khỏi git" hoặc "giữ như hiện tại".
         for name, answer in (("tr", "1"), ("tk", "2")):
             r = Path(tmp) / name; (r / ".kiro" / "settings").mkdir(parents=True); g(r, "init", "-q")
-            (r / ".kiro" / "settings" / "mcp.json").write_text('{"mcpServers": {}}')
+            (r / ".kiro" / "settings" / "mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
             g(r, "add", "."); g(r, "commit", "-qm", "team")
             out = x("setup", "--agent", "kiro", "--scope", "local", cwd=r, inp=answer + "\n")
             assert ".kiro/settings/mcp.json" in out and "đã được git theo dõi" in out, out
             tracked = g(r, "ls-files", ".kiro")
             if answer == "1":
-                assert tracked == "" and "/.kiro/settings/mcp.json" in (r / ".git" / "info" / "exclude").read_text()
+                assert tracked == "" and "/.kiro/settings/mcp.json" in (r / ".git" / "info" / "exclude").read_text(encoding="utf-8")
                 assert g(r, "status", "--porcelain").strip() == "D  .kiro/settings/mcp.json", "chỉ còn thay đổi gỡ khỏi git (chưa commit)"
             else:
                 assert tracked.strip() == ".kiro/settings/mcp.json"
@@ -277,7 +277,7 @@ def check_xdlc():
         (pp / "convention.md").write_text("```json\n" + json.dumps(rules) + "\n```\n", encoding="utf-8")
         g(pp, "add", "."); g(pp, "commit", "-qm", "init")
         out = x("setup", "--agent", "kiro", "--scope", "local", cwd=pp)
-        assert "pre-push" in out and "xdlc pre-push" in (pp / ".git" / "hooks" / "pre-push").read_text(), out
+        assert "pre-push" in out and "xdlc pre-push" in (pp / ".git" / "hooks" / "pre-push").read_text(encoding="utf-8"), out
         assert "WO-1 --step impl" in x("link", "--list", cwd=pp) and "chưa map" in x("status", cwd=pp)
         assert "Đã map nhánh main → WO-1" in x("link", cwd=pp, inp="1\n")  # menu (gõ số khi không có terminal)
         assert "Đã map nhánh main → WO-2" in x("link", "WO-2", cwd=pp)  # viết tắt, cho agent
@@ -307,11 +307,11 @@ def check_xdlc():
         assert "Đã cập nhật" in x("update")
         assert "Đã gỡ" in x("remove", "--agent", "kiro", cwd=ws, inp="1\ny\n")
         assert not (kiro / "skills" / "implement").exists() and (kiro / "skills" / "deploy-guide" / "SKILL.md").is_file()
-        assert json.loads((kiro / "settings" / "mcp.json").read_text())["mcpServers"] == {"postgres": {"command": "pg"}}
+        assert json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {"postgres": {"command": "pg"}}
         assert "Đã đăng xuất" in x("logout") and "chưa đăng nhập" in x("status")
         assert "Đã gỡ Xora DLC" in x("uninstall", inp="y\n")
         assert not (home / ".xdlc").exists() and not xdlc.exists()
-        assert not (lr / ".kiro").exists() and "xdlc" not in (lr / ".git" / "info" / "exclude").read_text()
+        assert not (lr / ".kiro").exists() and "xdlc" not in (lr / ".git" / "info" / "exclude").read_text(encoding="utf-8")
         assert not (pp / ".git" / "hooks" / "pre-push").exists() and not (home / ".kiro" / "hooks").exists()
     srv.shutdown()
 
@@ -388,7 +388,7 @@ def check_menu():
                                                ("[y/N]", "y" + enter)], Path(tmp) / "a", env)
         assert code == 0 and out.count("Đã gỡ") == 2, out
         assert not (Path(tmp) / "a" / ".kiro").exists() and not (Path(tmp) / "b" / ".kiro").exists()
-        assert json.loads((home / ".xdlc" / "installs.json").read_text())["installs"] == []
+        assert json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"] == []
 
 
 if __name__ == "__main__":

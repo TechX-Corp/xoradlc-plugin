@@ -43,7 +43,7 @@ HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 def git_root(start):
     try:
         out = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True, timeout=10)
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
         return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
     except (OSError, subprocess.SubprocessError):
         return None
@@ -126,7 +126,7 @@ def check_file(path, rel, cfg, lines_changed=None, staged=False):
 
 
 def git(root, *args):
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def changed_lines(path, staged, rev=None):
@@ -152,7 +152,7 @@ def changed_files(root, staged=False):
             [["diff", "--name-only"], ["diff", "--name-only", "--cached"],
              ["ls-files", "--others", "--exclude-standard"]])
     for args in cmds:
-        res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+        res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
         files |= {f for f in res.stdout.splitlines() if f}
     return [root / f for f in sorted(files) if (root / f).is_file()]
 

@@ -46,7 +46,11 @@ def check_sensor():
                        '  String k = "abcdef123"; // convention-ignore: SEC-001 demo\n}\n', encoding="utf-8")
         hook = lambda: subprocess.run([sys.executable, str(sensor), "--hook", "claude"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                                       input=json.dumps({"cwd": str(repo), "tool_input": {"file_path": str(bad)}})).stdout
-        assert hook() == "", "chưa có convention.md thì sensor phải im lặng"
+        assert hook() == "", "repo chưa có convention.md: dùng bản mặc định của plugin (chưa có luật) nên im lặng"
+        default = json.loads((ROOT / "dev" / "convention.md").read_text(encoding="utf-8").split("```json\n")[1].split("\n```")[0])
+        assert default == {"rules": []}, "convention mặc định: chưa có luật (bổ sung sau)"
+        out = subprocess.run([sys.executable, str(sensor)], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        assert "convention mặc định của plugin" in out.stdout, out.stdout + out.stderr
         (repo / "convention.md").write_text((ROOT / "dev" / "convention.sample.md").read_text(encoding="utf-8"), encoding="utf-8")
         ctx = json.loads(hook())["hookSpecificOutput"]["additionalContext"]
         assert "[LOG-001]" in ctx and "SEC-001" not in ctx.split("\n- ", 1)[1], ctx
@@ -214,6 +218,8 @@ def check_xdlc():
         assert r.returncode == 0, r.stdout + r.stderr
         assert (home / ".xdlc" / "plugin" / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py").is_file()
         assert "Đã cài lại" in x("setup", "--agent=kiro", "--scope=local", cwd=ws)
+        assert "Đã cài lại" in x("setup", "-a", "kiro", "-s", "local", cwd=ws)  # tuỳ chọn ngắn
+        assert "-a, --agent" in x("setup", "-a", "kiro", "-x", "y", cwd=ws, ok=False)
         assert len(json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"]) == 1, "setup lại không tạo mục trùng"
 
         g = lambda repo, *a: subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a],
@@ -243,7 +249,8 @@ def check_xdlc():
         assert "Đã cài lại" in x("setup", "--agent", "kiro", "--scope", "local", cwd=Path(tmp) / "tk"), "lần sau nhớ lựa chọn, không hỏi lại"
 
         # login OAuth (backend giả), status, MCP proxy
-        x("use", "local", "--url", f"http://127.0.0.1:{srv.server_port}")
+        x("use", "local", "-u", f"http://127.0.0.1:{srv.server_port}")
+        assert "chỉ dùng với local" in x("use", "prod", "-u", "http://x", ok=False) and "chỉ dùng với local" in x("use", "prod", "--url", "http://x", ok=False)
         mcp_in = "\n".join(json.dumps(m) for m in (
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
@@ -280,9 +287,9 @@ def check_xdlc():
         g(pp, "add", "."); g(pp, "commit", "-qm", "init")
         out = x("setup", "--agent", "kiro", "--scope", "local", cwd=pp)
         assert "pre-push" in out and "xdlc pre-push" in (pp / ".git" / "hooks" / "pre-push").read_text(encoding="utf-8"), out
-        assert "WO-1 --step impl" in x("link", "--list", cwd=pp) and "chưa map" in x("status", cwd=pp)
+        assert "WO-1 --step impl" in x("link", "-l", cwd=pp) and "chưa map" in x("status", cwd=pp)
         assert "Đã map nhánh main → WO-1" in x("link", cwd=pp, inp="1\n")  # menu (gõ số khi không có terminal)
-        assert "Đã map nhánh main → WO-2" in x("link", "WO-2", cwd=pp)  # viết tắt, cho agent
+        assert "Đã map nhánh main → WO-2" in x("link", "WO-2", "-t", "impl", "-b", "main", cwd=pp)  # viết tắt, cho agent
         assert "không có trong" in x("link", "WO-9", cwd=pp, ok=False)
         assert "(trước: WO-2)" in x("link", "wo-1", cwd=pp) and "WO-1 · Tích hợp eKYC" in x("status", cwd=pp)
         (pp / "A.java").write_text('class A { void a(){ System.out.println("x"); } }\n', encoding="utf-8")
@@ -304,7 +311,8 @@ def check_xdlc():
         assert "xdlc link" in out and (home / ".kiro" / "hooks" / "xora-dev-convention-sensor.json").is_file(), out
 
         # version, update (từ bản clone), remove, logout, uninstall
-        assert f"xdlc {version}" in x("version")
+        assert f"xdlc {version}" in x("--version") and f"xdlc {version}" in x("-v")
+        assert "  version " not in x() and "-v, --version" in x()
         check_claude_bundle(home, xdlc)
         assert "Đã cập nhật" in x("update")
         assert "Đã gỡ" in x("remove", "--agent", "kiro", cwd=ws, inp="1\ny\n")

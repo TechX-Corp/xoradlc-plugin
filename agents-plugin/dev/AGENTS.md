@@ -58,7 +58,7 @@ Tool `xora_ask(text, session_id?)` gửi câu hỏi tới Xora DLC như chat tr�
 
 ## Sensor convention
 
-Mỗi khi code được tạo hoặc sửa, sensor kiểm theo `convention.md` ở gốc repo và **cảnh báo** — không chặn. Claude Code chạy sensor tự động qua hook `PostToolUse` sau mỗi lần Write / Edit; Kiro nhắc bạn chạy sau mỗi lần lưu file code; công cụ khác thì tự chạy sau mỗi lần ghi code:
+Mỗi khi code được tạo hoặc sửa, sensor kiểm theo `convention.md` ở gốc repo (không có thì theo bản mặc định của plugin) và **cảnh báo** — không chặn. Claude Code chạy sensor tự động qua hook `PostToolUse` sau mỗi lần Write / Edit; Kiro nhắc bạn chạy sau mỗi lần lưu file code; công cụ khác thì tự chạy sau mỗi lần ghi code:
 
 ```sh
 xdlc sensor   # kiểm các file đang đổi trong git (--staged, --full, hoặc liệt kê file)
@@ -68,7 +68,7 @@ xdlc sensor   # kiểm các file đang đổi trong git (--staged, --full, hoặ
 - Không tự thêm `convention-ignore` hay sửa `convention.md` để hết cảnh báo. Chỉ làm khi Developer đồng ý, và ghi vào mục *Nợ kỹ thuật* của changeset.
 - Kết quả sensor (số cảnh báo còn lại theo mã luật) đưa vào mục *Kết quả kiểm tại chỗ* của hồ sơ changeset.
 - Khi `git push`, hook pre-push của `xdlc` gửi các cảnh báo còn lại về Xora DLC, vào work order đã map với nhánh. Developer nhờ đổi work order của nhánh → `xdlc link --list` (xem map hiện tại và các bước có thể chọn), rồi `xdlc link <WO> [--step <bước>]`. Không tự chọn work order khi Developer chưa nói rõ; `xdlc link` không tham số mở menu, chỉ dùng được trong terminal của Developer.
-- Chưa có `convention.md` → nhắc Developer một lần: copy `convention.sample.md` ở gốc plugin `xora-dev` về gốc repo thành `convention.md`, rồi sửa cho khớp dự án. Không tự tạo hay tự đặt ra convention.
+- Repo không có `convention.md` thì sensor dùng bản mặc định của plugin; không cần nhắc Developer tạo file. Không tự tạo hay tự đặt ra convention cho repo.
 
 ## Dữ liệu nhạy cảm
 

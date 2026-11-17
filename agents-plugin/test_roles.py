@@ -102,6 +102,8 @@ def check_xdlc():
     cli = repo / "xdlc"
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     version = re.search(r'^VERSION = "([^"]+)"', cli.read_text(encoding="utf-8"), re.M).group(1)
+    ps1 = (repo / "install.ps1").read_bytes()
+    assert ps1.isascii(), "install.ps1 phải chỉ có ký tự ASCII (PowerShell 5.1 đọc .ps1 không BOM theo ANSI)"
     assert market["plugins"][0]["version"] == version, "VERSION trong xdlc phải khớp marketplace.json"
 
     seen = {"mcp": [], "sensor": []}

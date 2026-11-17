@@ -60,7 +60,7 @@ Trên Windows, `xdlc` lưu dữ liệu ở `%USERPROFILE%\.xdlc` (token mã hoá
 |---|---|
 | `xdlc is not recognized` / `'xdlc' không được nhận dạng` | Mở cửa sổ terminal mới. Vẫn lỗi: kiểm `PATH` của user có `%LOCALAPPDATA%\Programs\xdlc` |
 | `Python was not found; run without arguments to install from the Microsoft Store` | Đó là bản giả của Store. Cài Python ở Bước 0, hoặc tắt *App execution aliases* cho `python.exe` trong Settings |
-| `xdlc cần Python 3.9 trở lên` | Cài Python ở Bước 0, mở PowerShell mới, chạy lại lệnh cài |
+| `xdlc needs Python 3.9 or later` | Cài Python ở Bước 0, mở PowerShell mới, chạy lại lệnh cài |
 | PowerShell báo script bị chặn (ExecutionPolicy, AppLocker) | Dùng đúng lệnh có `-ExecutionPolicy ByPass` ở trên; máy công ty vẫn chặn thì nhờ IT |
 | Menu không đổi khi bấm ↑/↓ (console cũ) | Dùng Windows Terminal, hoặc đặt `set XDLC_PLAIN=1` để gõ số |
 

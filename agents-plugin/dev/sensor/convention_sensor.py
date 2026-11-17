@@ -255,6 +255,12 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # stdin / stdout / stderr luôn UTF-8: Windows mặc định cp1252, không in được tiếng Việt, ⚠ hay JSON của hook.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     # Chỉ cảnh báo, không chặn: mọi lỗi (convention.md sai, regex sai, …) thành một cảnh báo, luôn exit 0.
     try:
         main(sys.argv[1:])

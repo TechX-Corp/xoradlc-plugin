@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Xora DLC convention sensor",
+      "description": "Sau khi lưu file code: nhắc agent chạy xdlc sensor (chỉ khi repo có convention.md) và xử lý cảnh báo. Không chặn.",
+      "trigger": "PostFileSave",
+      "matcher": "\\.(java|kt|ts|tsx|js|jsx|py|cs|go|ya?ml|properties)$",
+      "action": {
+        "type": "agent",
+        "prompt": "Một file code vừa được lưu. Chỉ khi gốc workspace có `convention.md` (hoặc `docs/convention.md`): chạy `xdlc sensor` ở gốc workspace (không truyền file: sensor tự kiểm các file đang đổi trong git). Không có file đó thì bỏ qua, không chạy gì và không nhắc gì. Có cảnh báo thì: sửa những vi phạm nằm trong phần code bạn vừa sinh / sửa; vi phạm ở code cũ hoặc chỗ cố ý giữ thì chỉ liệt kê cho Developer, không tự sửa lan ra. Không thêm `convention-ignore` khi Developer chưa đồng ý."
+      }
+    }
+  ]
+}

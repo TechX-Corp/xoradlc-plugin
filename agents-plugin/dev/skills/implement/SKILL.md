@@ -28,7 +28,7 @@ Cần convention hay tiền lệ nội bộ mà repo không có → hỏi agent 
 
 ## Bước 3 — Kiểm tại chỗ
 
-Chạy những gì dự án có: build, lint, **sensor convention** (`sensor/convention_sensor.py` của plugin — hook thường đã chạy, chạy lại một lần trên toàn bộ file đổi trước khi bàn giao), unit test, độ phủ, quét secret / phụ thuộc. Báo đúng kết quả thật:
+Chạy những gì dự án có: build, lint, **sensor convention** (`xdlc sensor` — hook thường đã chạy, chạy lại một lần trên toàn bộ file đổi trước khi bàn giao), unit test, độ phủ, quét secret / phụ thuộc. Báo đúng kết quả thật:
 
 - Chạy được → nêu lệnh đã chạy và kết quả (kể cả đỏ).
 - Không chạy được (thiếu môi trường, thiếu quyền) → ghi *chưa chạy*, kèm lý do. **Không bao giờ báo xanh khi chưa chạy.**

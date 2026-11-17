@@ -47,14 +47,14 @@ Không bao giờ từ chối làm vì "chưa qua bước hỏi". Người dùng 
 
 ## Dùng agent Xora DLC (MCP server `xora-dev`)
 
-Tool `xora_ask(text, session_id?)` gửi câu hỏi tới Xora DLC như chat trên web. Xora DLC xác định người hỏi qua đăng nhập OAuth của người dùng, chuyển cho **agent AAP** của vai người đó; AAP tự gọi các function của Xora DLC (việc của tôi, work order, bước, tài liệu, open question, quyết định) và tra KB, rồi trả lời có trích dẫn. AAP kiểm quyền theo người dùng và vai, chỉ artifact đã phê duyệt mới lên S3, và ghi audit.
+Tool `xora_ask(text, session_id?)` gửi câu hỏi tới Xora DLC như chat trên web. Xora DLC xác định người hỏi qua token đăng nhập mà lệnh `xdlc` giữ trên máy, chuyển cho **agent AAP** của vai người đó; AAP tự gọi các function của Xora DLC (việc của tôi, work order, bước, tài liệu, open question, quyết định) và tra KB, rồi trả lời có trích dẫn. AAP kiểm quyền theo người dùng và vai, chỉ artifact đã phê duyệt mới lên S3, và ghi audit.
 
 - Gọi khi cần dữ liệu Xora DLC (việc của tôi, trạng thái work order, BRD / thiết kế của bước, open question) hoặc tri thức nội bộ: convention, mẫu xử lý lỗi, mã lỗi chuẩn, tiền lệ kỹ thuật, quy định bảo mật. Có mã work order (`WO-…`) thì ghi vào câu hỏi. Không gọi cho việc thuần thao tác workspace.
 - Hỏi tiếp cùng chủ đề → truyền `session_id` của câu trả lời trước. Chủ đề mới → không truyền.
 - Gom đủ ngữ cảnh vào `text` (tối đa 3.800 ký tự): yêu cầu của người dùng, đoạn nguồn liên quan. Chỉ gửi đoạn code cần thiết; **xoá secret, token, connection string, dữ liệu khách hàng** trước khi gửi.
 - Không tự bịa nội dung KB. Trích dẫn nguồn bằng số `[n]` AAP trả về; tách rõ *Theo AAP* và *Nhận xét của agent*. `evidence` khác `sufficient` → nói rõ, không dùng làm căn cứ chắc chắn (`[CẦN XÁC NHẬN]`).
 - **Ghi** (lưu tài liệu vào KB / S3) cũng qua `xora_ask`, nhưng chỉ khi người dùng đã xác nhận rõ trong lượt đó — theo skill `upload-tech-doc`. Không tự lưu vì thấy "nên có trong KB".
-- Lỗi (mã lỗi, nội dung lỗi) → báo người dùng và hỏi; không lặng lẽ tự trả lời thay. Báo cần đăng nhập → bảo người dùng đăng nhập Xora DLC (Kiro: `/mcp auth`; Claude Code: `/mcp`).
+- Lỗi (mã lỗi, nội dung lỗi) → báo người dùng và hỏi; không lặng lẽ tự trả lời thay. Báo chưa đăng nhập / hết phiên → bảo người dùng chạy `xdlc login` trong terminal (kiểm tài khoản: `xdlc status`). `forbidden` → tài khoản thiếu vai được hỏi agent: bảo người dùng chạy `xdlc status` xem vai, nhờ admin gán vai.
 
 ## Sensor convention
 

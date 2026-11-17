@@ -1,0 +1,1080 @@
+#!/usr/bin/env python3
+"""xdlc: Xora DLC cho Claude Code và Kiro CLI (plugin xora-dev, đăng nhập, cập nhật).
+
+Một file, chỉ thư viện chuẩn, Python 3.9+. xdlc giữ token đăng nhập Xora DLC (OAuth, PKCE) trong ~/.xdlc và
+chạy MCP server cục bộ `xdlc mcp` cho agent: mọi yêu cầu MCP được chuyển tới <backend>/mcp/user kèm token.
+Ghi vào máy: ~/.xdlc (config, token, gói plugin, danh sách đã setup) và những file `xdlc setup` liệt kê.
+"""
+import base64
+import hashlib
+import http.server
+import json
+import os
+import secrets
+import select
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import webbrowser
+from pathlib import Path
+
+VERSION = "0.2.0"
+REPO = "TechX-Corp/xoradlc-plugin"
+PROD_URL = "https://xoradlc-platform-api.techxcorp.com"
+LOCAL_URL = "http://localhost:8000"
+CLIENT_ID = "xora-plugin"
+SERVER = "xora-dev"  # tên MCP server trong agent
+MARKET = "xora-role-plugins"
+PLUGIN = "xora-dev@" + MARKET
+AGENTS = {"kiro": "Kiro CLI", "claude": "Claude Code"}
+SCOPES = ("global", "local")
+SCOPE_NAME = {"global": "Global", "local": "Local"}
+CLAUDE_SCOPE = {"global": "user", "local": "local"}
+EXCLUDE_END = "# xdlc:end"
+
+HOME = Path.home()
+XDLC = HOME / ".xdlc"
+BUNDLE = XDLC / "plugin"  # bản sao repo plugin; Claude Code nạp marketplace tại chỗ từ đây
+BIN = Path(os.environ.get("XDLC_BIN_DIR") or HOME / ".local" / "bin") / "xdlc"
+
+HELP = """xdlc {v}: Xora DLC cho Claude Code và Kiro CLI
+
+Cách dùng: xdlc <lệnh> [tuỳ chọn]
+
+Lệnh:
+  setup      Cài plugin xora-dev cho Kiro CLI hoặc Claude Code
+  remove     Gỡ một hay nhiều lần setup
+  login      Đăng nhập Xora DLC (mở trình duyệt)
+  logout     Đăng xuất Xora DLC trên máy này
+  status     Backend, tài khoản và vai đang đăng nhập, nơi đã setup
+  use        Chọn backend: bản deploy (prod) hoặc local
+  update     Cập nhật xdlc và plugin lên bản mới nhất
+  version    Version đang cài và bản mới nhất
+  uninstall  Gỡ toàn bộ Xora DLC khỏi máy
+
+Viết tắt (bỏ qua câu hỏi trên terminal):
+  xdlc setup --agent kiro|claude --scope global|local
+  xdlc remove --agent kiro|claude
+  xdlc use prod | xdlc use local [--url URL]
+
+Scope: global = mọi repo trên máy; local = project hiện tại, git không theo dõi file của xdlc.
+Xem chi tiết một lệnh: xdlc <lệnh> --help
+"""
+
+CMD_HELP = {
+    "setup": "xdlc setup [--agent kiro|claude] [--scope global|local]\n\nCài plugin xora-dev (skill, steering, sensor, MCP server) cho Kiro CLI hoặc Claude Code.\n"
+             "Thiếu --agent / --scope thì hỏi trên terminal. Scope:\n"
+             "  global  mọi repo trên máy\n"
+             "  local   project hiện tại (thư mục đang đứng); git không theo dõi file của xdlc\n"
+             "File đó đã được git theo dõi từ trước thì hỏi: gỡ khỏi git, hay giữ như hiện tại.\n"
+             "Setup local cho nhiều project được; setup lại cùng chỗ là cài lại.",
+    "remove": "xdlc remove [--agent kiro|claude]\n\nChọn các lần setup cần gỡ: ↑/↓ di chuyển, Space đánh dấu, a tất cả, Enter xác nhận\n"
+              "(không có terminal: gõ 1,3 | 1-2 | all). Chỉ xoá đúng file xdlc đã cài;\n"
+              "file bạn đã sửa thì hỏi trước. Trong mcp.json chỉ xoá khối xora-dev.",
+    "login": "xdlc login\n\nMở trình duyệt tới trang đăng nhập Xora DLC (SSO hoặc tài khoản local) của backend đang dùng.\n"
+             "Trình duyệt đang đăng nhập web sẵn thì dùng luôn tài khoản đó: xdlc in ra tài khoản để bạn kiểm.",
+    "logout": "xdlc logout\n\nXoá token Xora DLC của backend đang dùng khỏi máy này.",
+    "status": "xdlc status\n\nIn version, backend đang dùng, tài khoản và vai đang đăng nhập, và các lần setup.",
+    "use": "xdlc use [prod|local] [--url URL]\n\nKhông tham số: in backend đang dùng. prod = bản deploy, local = backend chạy trên máy\n"
+           "(mặc định http://localhost:8000; --url đổi và ghi nhớ). Token tách riêng theo backend.\n"
+           "Sau khi đổi, mở phiên agent mới (hoặc reconnect trong /mcp).",
+    "update": "xdlc update\n\nTải bản phát hành mới nhất (git tag vX.Y.Z), thay xdlc và plugin, rồi cài lại vào mọi chỗ đã setup.",
+    "version": "xdlc version\n\nIn version xdlc, version plugin đã cài, và bản mới nhất nếu có.",
+    "uninstall": "xdlc uninstall\n\nGỡ mọi lần setup, đăng xuất, xoá ~/.xdlc và chính lệnh xdlc. Hỏi xác nhận trước.",
+}
+
+ASK_TOOL = {  # bản cục bộ của tool xora_ask: agent vẫn thấy tool khi chưa đăng nhập / mất mạng
+    "name": "xora_ask",
+    "description": "Ask the Xora DLC agent, in plain words, anything about the work in Xora DLC or the company "
+                   "knowledge base: my work, a work order's status and steps, its documents (BRD, design), open "
+                   "questions, decisions, conventions and precedents. The agent picks the Xora DLC functions itself "
+                   "and answers with citations; mention the work order code (WO-...) when you know it. Pass "
+                   "session_id from a previous answer to continue the conversation.",
+    "inputSchema": {"type": "object", "properties": {
+        "text": {"type": "string", "minLength": 1, "maxLength": 3800},
+        "session_id": {"type": "string", "description": "From a previous answer, to continue"}},
+        "required": ["text"]},
+}
+
+
+# ── tiện ích ────────────────────────────────────────────────────────────────────────────────────────────
+
+class Abort(Exception):
+    def __init__(self, msg, code=1):
+        super().__init__(msg)
+        self.code = code
+
+
+def err(msg):
+    print(msg, file=sys.stderr)
+
+
+def short(p):
+    s = str(p)
+    return "~" + s[len(str(HOME)):] if s == str(HOME) or s.startswith(str(HOME) + os.sep) else s
+
+
+def load_json(path, default):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path, data, private=False):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    if private:
+        os.chmod(tmp, 0o600)
+        os.chmod(path.parent, 0o700)
+    os.replace(tmp, path)
+
+
+def sha256(path):
+    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def ask(prompt):
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        raise Abort("Cần trả lời trên terminal: chạy lệnh trong một terminal tương tác.", 2)
+
+
+def confirm(prompt):
+    return ask(prompt + " [y/N] ").lower() in ("y", "yes", "c", "co", "có")
+
+
+def arrow_keys():
+    """Menu phím mũi tên khi stdin/stdout là terminal thật trên macOS / Linux; ngoài ra (pipe, CI, Windows,
+    XDLC_PLAIN=1) thì gõ số như cũ."""
+    if os.name != "posix" or os.environ.get("XDLC_PLAIN") or os.environ.get("TERM") == "dumb":
+        return False
+    try:
+        import termios  # noqa: F401
+        import tty  # noqa: F401
+    except ImportError:
+        return False
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _key(fd):
+    b = os.read(fd, 1)
+    if b == b"\x1b":
+        if not select.select([fd], [], [], 0.05)[0]:
+            return "esc"
+        return {b"[A": "up", b"[B": "down", b"OA": "up", b"OB": "down"}.get(os.read(fd, 2), "")
+    return {b"\r": "enter", b"\n": "enter", b" ": "space", b"k": "up", b"j": "down",
+            b"a": "all", b"q": "esc", b"\x04": "esc"}.get(b, "")
+
+
+def menu(title, labels, multi=False):
+    """↑/↓ di chuyển, Enter chọn; multi: Space đánh dấu, a = tất cả. Esc / q huỷ. → chỉ số đã chọn."""
+    import termios
+    import tty
+    fd, n = sys.stdin.fileno(), len(labels)
+    cols = shutil.get_terminal_size((80, 24)).columns
+    width = cols - 1 if cols >= 40 else 10_000  # không biết độ rộng thì không cắt dòng
+    tips = ("↑/↓ di chuyển · Space chọn · a chọn tất cả · Enter xác nhận · Esc huỷ" if multi
+            else "↑/↓ di chuyển · Enter chọn · Esc huỷ")
+    cur, marked, hint, result = 0, set(), None, None
+    out = sys.stdout
+
+    def draw(first=False):
+        if not first:
+            out.write(f"\x1b[{n + 1}A")
+        for i, text in enumerate(labels):
+            box = ("[x] " if i in marked else "[ ] ") if multi else ""
+            out.write("\r\x1b[2K" + f"{'>' if i == cur else ' '} {box}{text}"[:width] + "\n")
+        out.write("\r\x1b[2K" + (hint or tips)[:width] + "\n")
+        out.flush()
+
+    print(title)
+    old = termios.tcgetattr(fd)
+    out.write("\x1b[?25l")
+    try:
+        tty.setcbreak(fd, termios.TCSANOW)  # TCSANOW: không bỏ phím đã gõ sẵn
+        draw(first=True)
+        while result is None:
+            k, hint = _key(fd), None
+            if k == "up":
+                cur = (cur - 1) % n
+            elif k == "down":
+                cur = (cur + 1) % n
+            elif k == "space" and multi:
+                marked ^= {cur}
+            elif k == "all" and multi:
+                marked = set() if len(marked) == n else set(range(n))
+            elif k == "enter":
+                if not multi:
+                    result = [cur]
+                elif marked:
+                    result = sorted(marked)
+                else:
+                    hint = "Chưa chọn mục nào: Space để chọn, Esc để huỷ"
+            elif k == "esc":
+                raise Abort("Đã huỷ.", 0)
+            if result is None:
+                draw()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        out.write(f"\x1b[{n + 1}A\x1b[J\x1b[?25h")  # xoá menu, hiện lại con trỏ
+        out.flush()
+    for i in result:
+        print(f"  › {labels[i]}")
+    return result
+
+
+def choose(title, options):
+    """options: [(key, label)] → key. Phím mũi tên trên terminal; ngoài ra gõ số đến khi hợp lệ."""
+    if arrow_keys():
+        return options[menu(title, [lab for _, lab in options])[0]][0]
+    print(title)
+    for i, (_, label) in enumerate(options, 1):
+        print(f"  {i}) {label}")
+    while True:
+        a = ask("> ")
+        if a.isdigit() and 1 <= int(a) <= len(options):
+            return options[int(a) - 1][0]
+        print(f"Nhập một số từ 1 đến {len(options)}.")
+
+
+def pick_many(n, answer):
+    """'1,3' | '1-2' | 'all' → các chỉ số 0-based, None nếu không hợp lệ."""
+    if answer.lower() in ("all", "tất cả"):
+        return list(range(n))
+    out = []
+    for part in answer.replace(" ", "").split(","):
+        lo, _, hi = part.partition("-")
+        if not lo.isdigit() or (hi and not hi.isdigit()):
+            return None
+        a, b = int(lo), int(hi or lo)
+        if not 1 <= a <= b <= n:
+            return None
+        out += [i - 1 for i in range(a, b + 1) if i - 1 not in out]
+    return out or None
+
+
+def run(cmd, cwd=None, check=True):
+    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    if check and r.returncode != 0:
+        raise Abort(f"Lệnh lỗi: {' '.join(cmd)}\n{(r.stderr or r.stdout).strip()}")
+    return r
+
+
+def xdlc_path():
+    """Đường dẫn agent dùng để chạy `xdlc mcp`: bản đã cài, nếu không thì chính file đang chạy."""
+    return BIN if BIN.is_file() else Path(os.path.abspath(sys.argv[0]))
+
+
+# ── cấu hình, backend, token ────────────────────────────────────────────────────────────────────────────
+
+def config():
+    c = load_json(XDLC / "config.json", {})
+    return {"env": c.get("env") or "prod", "local_url": c.get("local_url") or LOCAL_URL}
+
+
+def base_url(c=None):
+    c = c or config()
+    return (PROD_URL if c["env"] == "prod" else c["local_url"]).rstrip("/")
+
+
+def request(method, url, *, body=None, form=None, token=None, timeout=30):
+    """→ (status, json | text | None). Lỗi mạng: status 0."""
+    headers = {"Accept": "application/json"}
+    data = None
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            status, raw = r.status, r.read()
+    except urllib.error.HTTPError as e:
+        status, raw = e.code, e.read()
+    except (urllib.error.URLError, OSError) as e:
+        return 0, str(getattr(e, "reason", e))
+    if not raw:
+        return status, None
+    try:
+        return status, json.loads(raw)
+    except ValueError:
+        return status, raw.decode(errors="replace")
+
+
+_token_lock = threading.Lock()
+
+
+def tokens(env=None):
+    return load_json(XDLC / "auth.json", {}).get(env or config()["env"])
+
+
+def save_tokens(env, t):
+    auth = load_json(XDLC / "auth.json", {})
+    if t is None:
+        auth.pop(env, None)
+    else:
+        auth[env] = t
+    save_json(XDLC / "auth.json", auth, private=True)
+
+
+def _store(env, granted):
+    t = {"access_token": granted["access_token"], "refresh_token": granted.get("refresh_token"),
+         "expires_at": int(time.time()) + int(granted.get("expires_in") or 3600)}
+    save_tokens(env, t)
+    return t
+
+
+def access_token(force_refresh=False):
+    """Access token còn hạn của backend đang dùng (tự làm mới), None khi chưa đăng nhập / hết phiên."""
+    with _token_lock:
+        c = config()
+        t = tokens(c["env"])
+        if not t:
+            return None
+        if not force_refresh and t["expires_at"] - 60 > time.time():
+            return t["access_token"]
+        if not t.get("refresh_token"):
+            return None
+        status, out = request("POST", base_url(c) + "/oauth/token",
+                              form={"grant_type": "refresh_token", "refresh_token": t["refresh_token"],
+                                    "client_id": CLIENT_ID})
+        if status == 200 and isinstance(out, dict) and out.get("access_token"):
+            return _store(c["env"], out)["access_token"]
+        if status in (400, 401):  # refresh token hết hạn / tài khoản bị khoá: phải đăng nhập lại
+            save_tokens(c["env"], None)
+        return None
+
+
+def whoami():
+    """→ (thông tin tài khoản | None, lý do)."""
+    token = access_token()
+    if not token:
+        return None, "chưa đăng nhập (chạy xdlc login)"
+    status, out = request("GET", base_url() + "/oauth/userinfo", token=token)
+    if status == 401:
+        token = access_token(force_refresh=True)
+        if token:
+            status, out = request("GET", base_url() + "/oauth/userinfo", token=token)
+    if status == 200 and isinstance(out, dict):
+        return out, ""
+    if status == 0:
+        return None, f"không kết nối được {base_url()} ({out})"
+    return None, "phiên đăng nhập hết hạn: chạy xdlc login" if status == 401 else f"lỗi HTTP {status}"
+
+
+def account_line(u):
+    role = (u.get("role") or "").upper() or "chưa có vai"
+    return f"{u.get('name')} ({u.get('username')}) · vai {role}"
+
+
+# ── gói plugin ──────────────────────────────────────────────────────────────────────────────────────────
+
+def _semver(tag):
+    try:
+        return tuple(int(x) for x in tag.lstrip("v").split("."))
+    except ValueError:
+        return None
+
+
+def latest_release():
+    """Tag vX.Y.Z mới nhất trên GitHub (repo public, không cần token), None khi không hỏi được / chưa có."""
+    status, out = request("GET", f"https://api.github.com/repos/{REPO}/tags?per_page=100", timeout=8)
+    if status != 200 or not isinstance(out, list):
+        return None
+    tags = [(v, t["name"]) for t in out if (v := _semver(t.get("name", ""))) and len(v) == 3]
+    return max(tags)[1] if tags else None
+
+
+def _copy_tree(src, dst):
+    shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True,
+                    ignore=shutil.ignore_patterns(".git", "__pycache__", ".kiro", "archived"))
+
+
+def fetch_bundle(ref=None):
+    """Lấy repo plugin (XDLC_PLUGIN_DIR, hoặc tarball của ref trên GitHub) vào thư mục tạm → Path gốc repo."""
+    tmp = Path(tempfile.mkdtemp(prefix="xdlc-"))
+    local = os.environ.get("XDLC_PLUGIN_DIR")
+    if local:
+        _copy_tree(Path(local).expanduser().resolve(), tmp / "repo")
+        return tmp / "repo"
+    refs = [ref] if ref else [os.environ.get("XDLC_REF") or f"v{VERSION}", "main"]
+    for r in refs:
+        url = f"https://codeload.github.com/{REPO}/tar.gz/{urllib.parse.quote(r)}"
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp, tarfile.open(fileobj=resp, mode="r|gz") as tar:
+                for m in tar:
+                    target = (tmp / m.name).resolve()
+                    if not str(target).startswith(str(tmp.resolve()) + os.sep) or m.issym() or m.islnk():
+                        continue  # không giải nén ra ngoài thư mục tạm, bỏ symlink
+                    tar.extract(m, tmp)
+        except (urllib.error.URLError, OSError, tarfile.TarError) as e:
+            for p in tmp.iterdir():  # bỏ phần đã giải nén dở trước khi thử ref khác
+                shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink()
+            if r != refs[-1]:
+                err(f"Không tải được {r} ({e}); thử {refs[-1]}.")
+                continue
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise Abort(f"Không tải được plugin từ GitHub ({e}).")
+        roots = [p for p in tmp.iterdir() if p.is_dir()]
+        if len(roots) == 1:
+            return roots[0]
+    raise Abort("Gói plugin tải về không đúng cấu trúc.")
+
+
+def install_bundle(src):
+    """Thay ~/.xdlc/plugin bằng src (đổi tên nguyên tử, giữ bản cũ đến khi xong)."""
+    if not (src / "agents-plugin" / "dev").is_dir():
+        raise Abort(f"Không thấy agents-plugin/dev trong {src}")
+    XDLC.mkdir(parents=True, exist_ok=True)
+    new, old = XDLC / "plugin.new", XDLC / "plugin.old"
+    for p in (new, old):
+        shutil.rmtree(p, ignore_errors=True)
+    shutil.move(str(src), str(new))
+    if BUNDLE.exists():
+        BUNDLE.rename(old)
+    new.rename(BUNDLE)
+    shutil.rmtree(old, ignore_errors=True)
+    shutil.rmtree(src.parent, ignore_errors=True)
+
+
+def ensure_bundle():
+    if not (BUNDLE / "agents-plugin" / "dev").is_dir() or os.environ.get("XDLC_PLUGIN_DIR"):
+        install_bundle(fetch_bundle())
+    return BUNDLE / "agents-plugin"
+
+
+def bundle_version():
+    m = load_json(BUNDLE / "agents-plugin" / ".claude-plugin" / "marketplace.json", {})
+    return next((p.get("version") for p in m.get("plugins", []) if p.get("name") == SERVER), None)
+
+
+def mcp_entry():
+    return {"command": str(xdlc_path()), "args": ["mcp"]}
+
+
+# ── danh sách đã setup ──────────────────────────────────────────────────────────────────────────────────
+
+def installs():
+    return load_json(XDLC / "installs.json", {}).get("installs", [])
+
+
+def save_installs(items):
+    save_json(XDLC / "installs.json", {"version": VERSION, "installs": items})
+
+
+def label(rec):
+    where = "" if rec["scope"] == "global" else "  " + short(rec["path"])
+    return f"{AGENTS[rec['agent']].split()[0]:<7} {SCOPE_NAME.get(rec['scope'], rec['scope']):<7}{where}"
+
+
+def same(a, b):
+    return a["agent"] == b["agent"] and a["scope"] == b["scope"] and a["path"] == b["path"]
+
+
+# ── git: Local không để git theo dõi file của xdlc ─────────────────────────────────────────────────────
+
+def git_root(path):
+    r = run(["git", "-C", str(path), "rev-parse", "--show-toplevel"], check=False)
+    return Path(r.stdout.strip()).resolve() if r.returncode == 0 else None
+
+
+def git_tracked(base, rels):
+    """Những rels (tương đối với base) đang được git theo dõi."""
+    if not rels or not git_root(base):
+        return []
+    r = run(["git", "-C", str(base), "ls-files", "--", *rels], check=False)
+    return sorted(set(r.stdout.split()) & set(rels)) if r.returncode == 0 else []
+
+
+def _exclude_file(base):
+    r = run(["git", "-C", str(base), "rev-parse", "--git-path", "info/exclude"], check=False)
+    p = Path(r.stdout.strip())
+    return p if p.is_absolute() else Path(base) / p
+
+
+def set_exclude(base, rels):
+    """Khối xdlc của base trong .git/info/exclude (chỉ máy này, không commit); rels rỗng = gỡ khối."""
+    root = git_root(base)
+    if not root:
+        return
+    prefix = Path(base).resolve().relative_to(root).as_posix()
+    begin = f"# xdlc:begin {prefix if prefix != '.' else '/'} (Xora DLC, Local)"
+    f = _exclude_file(base)
+    lines = f.read_text().splitlines() if f.exists() else []
+    if begin in lines:
+        a = lines.index(begin)
+        b = next((i for i in range(a, len(lines)) if lines[i] == EXCLUDE_END), a)
+        lines = lines[:a] + lines[b + 1:]
+    if rels:
+        pre = "" if prefix == "." else prefix + "/"
+        lines += [begin] + ["/" + pre + r for r in sorted(rels)] + [EXCLUDE_END]
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("\n".join(lines) + ("\n" if lines else ""))
+
+
+def local_git(base, rels, old, interactive):
+    """Local: file của xdlc mà git đã theo dõi từ trước → hỏi gỡ khỏi git hay giữ. → 'untrack' | 'keep' | None."""
+    tracked = git_tracked(base, rels)
+    if not tracked:
+        return None
+    if old and old.get("git_tracked") in ("untrack", "keep"):  # đã chọn ở lần setup trước
+        choice = old["git_tracked"]
+    elif not interactive:
+        return "keep"
+    else:
+        print("Các file sau đã được git theo dõi trong repo này:")
+        for r in tracked:
+            print(f"  {r}")
+        choice = choose("Local nghĩa là git không theo dõi file của xdlc. Chọn:", [
+            ("untrack", "Gỡ khỏi git (git rm --cached): file vẫn còn trên máy; khi commit, file cũng bị gỡ khỏi repo của cả team"),
+            ("keep", "Giữ như hiện tại: git vẫn theo dõi, thay đổi của xdlc sẽ hiện trong git status"),
+        ])
+    if choice == "untrack":
+        run(["git", "-C", str(base), "rm", "--cached", "-q", "--", *tracked], check=False)
+        print("Đã gỡ khỏi git (chưa commit). Commit thay đổi này nếu muốn gỡ khỏi repo của team.")
+    return choice
+
+
+# ── Kiro ────────────────────────────────────────────────────────────────────────────────────────────────
+
+MCP_REL = ".kiro/settings/mcp.json"
+
+
+def kiro_files(src, scope):
+    """(nguồn, đích tương đối với thư mục gốc): skill, steering, hook (hook chỉ có ở Local: Kiro chạy hook theo workspace)."""
+    out = [(f, Path(".kiro/skills") / f.relative_to(src / "skills"))
+           for f in sorted((src / "skills").rglob("*")) if f.is_file()]
+    out.append((src / "AGENTS.md", Path(".kiro/steering/xora-dev.md")))
+    out += [(f, Path(".kiro/steering") / f.name) for f in sorted((src / "steering").glob("*.md"))]
+    if scope == "local":
+        out += [(f, Path(".kiro/hooks") / f.name) for f in sorted((src / "kiro-hooks").glob("*.kiro.hook"))]
+    return out
+
+
+def remove_file(base, rel, digest, interactive):
+    p = base / rel
+    if not p.is_file():
+        return
+    if sha256(p) != digest and not (interactive and confirm(f"  {short(p)} đã bị sửa sau khi cài. Vẫn xoá?")):
+        print(f"  Giữ lại {short(p)} (đã sửa).")
+        return
+    p.unlink()
+    d = p.parent
+    while d != base and d.name != ".kiro" and d.is_dir() and not any(d.iterdir()):
+        d.rmdir()
+        d = d.parent
+
+
+def setup_kiro(bundle, scope, path, old, interactive):
+    src, base = bundle / "dev", Path(path)
+    mcp_file = base / MCP_REL
+    plan = kiro_files(src, scope)
+    git_choice = local_git(base, [str(r) for _, r in plan] + [MCP_REL], old, interactive) if scope == "local" else None
+    files = {}
+    for f, rel in plan:
+        dst = base / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, dst)
+        files[str(rel)] = sha256(dst)
+    for rel, digest in (old or {}).get("files", {}).items():  # file của bản cũ không còn trong bản mới
+        if rel not in files:
+            remove_file(base, rel, digest, interactive)
+    created = (old or {}).get("created_mcp_json", not mcp_file.exists())
+    cfg = load_json(mcp_file, {})
+    cfg.setdefault("mcpServers", {})[SERVER] = {**mcp_entry(), "disabled": False, "autoApprove": []}
+    save_json(mcp_file, cfg)
+    rec = {"agent": "kiro", "scope": scope, "path": str(base), "version": bundle_version(),
+           "files": files, "mcp_json": MCP_REL, "created_mcp_json": created, "git_tracked": git_choice}
+    if scope == "local":
+        excluded = [r for r in files if git_choice != "keep" or r not in git_tracked(base, [r])]
+        if created or git_choice == "untrack":
+            excluded.append(MCP_REL)
+        set_exclude(base, excluded)
+    return rec
+
+
+def remove_kiro(rec, interactive):
+    base = Path(rec["path"])
+    for rel, digest in rec.get("files", {}).items():
+        remove_file(base, rel, digest, interactive)
+    mcp_file = base / rec["mcp_json"]
+    cfg = load_json(mcp_file, None)
+    if isinstance(cfg, dict):
+        cfg.get("mcpServers", {}).pop(SERVER, None)
+        if rec.get("created_mcp_json") and not cfg.get("mcpServers") and set(cfg) <= {"mcpServers"}:
+            mcp_file.unlink()
+            for d in (mcp_file.parent, mcp_file.parent.parent):
+                if d.is_dir() and d.name != ".kiro" and not any(d.iterdir()):
+                    d.rmdir()
+        else:
+            save_json(mcp_file, cfg)
+    if rec["scope"] == "local":
+        set_exclude(base, [])
+    kiro = base / ".kiro"
+    if kiro.is_dir() and not any(kiro.iterdir()) and base != HOME:
+        kiro.rmdir()
+
+
+# ── Claude Code ─────────────────────────────────────────────────────────────────────────────────────────
+
+CLAUDE_LOCAL = ".claude/settings.local.json"
+
+
+def need_claude():
+    if not shutil.which("claude"):
+        raise Abort("Không thấy lệnh 'claude'. Cài Claude Code trước: https://code.claude.com")
+
+
+def setup_claude(bundle, scope, path, old, interactive):
+    need_claude()
+    git_choice = local_git(path, [CLAUDE_LOCAL], old, interactive) if scope == "local" else None
+    save_json(bundle / "dev" / ".mcp.json", {"mcpServers": {SERVER: mcp_entry()}})  # bản trong ~/.xdlc
+    if run(["claude", "plugin", "marketplace", "add", str(bundle)], check=False).returncode != 0:
+        run(["claude", "plugin", "marketplace", "update", MARKET])
+    r = run(["claude", "plugin", "install", PLUGIN, "--scope", CLAUDE_SCOPE[scope]], cwd=path, check=False)
+    if r.returncode != 0 and "already installed" not in (r.stdout + r.stderr):
+        raise Abort(f"claude plugin install lỗi:\n{(r.stderr or r.stdout).strip()}")
+    if scope == "local" and git_choice != "keep":
+        set_exclude(path, [CLAUDE_LOCAL])
+    return {"agent": "claude", "scope": scope, "path": str(path), "version": bundle_version(), "git_tracked": git_choice}
+
+
+def remove_claude(rec, interactive):
+    if rec["scope"] == "local" and Path(rec["path"]).is_dir():
+        set_exclude(rec["path"], [])
+    if not shutil.which("claude"):
+        print("  Không thấy lệnh 'claude': bỏ qua bước gỡ trong Claude Code.")
+        return
+    r = run(["claude", "plugin", "uninstall", PLUGIN, "--scope", CLAUDE_SCOPE[rec["scope"]]],
+            cwd=rec["path"] if Path(rec["path"]).is_dir() else None, check=False)
+    if r.returncode != 0:
+        print(f"  claude plugin uninstall: {(r.stderr or r.stdout).strip()}")
+
+
+SETUP = {"kiro": setup_kiro, "claude": setup_claude}
+REMOVE = {"kiro": remove_kiro, "claude": remove_claude}
+
+
+def after_claude_removed(items):
+    if not any(r["agent"] == "claude" for r in items) and shutil.which("claude"):
+        run(["claude", "plugin", "marketplace", "remove", MARKET], check=False)
+
+
+# ── lệnh ────────────────────────────────────────────────────────────────────────────────────────────────
+
+def options(argv, allowed):
+    """--agent kiro|claude, --scope global|local (cả dạng --x=y) → dict."""
+    vals = {"agent": AGENTS, "scope": SCOPES}
+    out, i = {}, 0
+    while i < len(argv):
+        k, eq, v = argv[i].partition("=")
+        name = k[2:] if k.startswith("--") else None
+        if name not in allowed:
+            raise Abort("Tuỳ chọn: " + " ".join(f"--{n} {'|'.join(vals[n])}" for n in allowed), 2)
+        if not eq:
+            i += 1
+            v = argv[i] if i < len(argv) else ""
+        if v not in vals[name]:
+            raise Abort(f"--{name} phải là {' hoặc '.join(vals[name])}.", 2)
+        out[name] = v
+        i += 1
+    return out
+
+
+def cmd_setup(argv):
+    opt = options(argv, ("agent", "scope"))
+    agent = opt.get("agent") or choose("Cài cho agent nào?", [(k, v) for k, v in AGENTS.items()])
+    if agent == "claude":
+        need_claude()
+    elif not shutil.which("kiro-cli"):
+        print("Lưu ý: chưa thấy lệnh 'kiro-cli' trên máy; vẫn cài, Kiro sẽ dùng khi bạn cài Kiro CLI.")
+    cwd = Path.cwd()
+    scope = opt.get("scope") or choose(f"Cài cho {AGENTS[agent]} ở đâu?", [
+        ("global", "Global  mọi repo trên máy"),
+        ("local", f"Local   project hiện tại ({short(cwd)}); git không theo dõi file của xdlc"),
+    ])
+    path = HOME if scope == "global" else cwd
+    if scope == "local" and cwd == HOME:
+        if not confirm(f"Thư mục hiện tại là thư mục home ({short(cwd)}), không phải một project. Vẫn cài?"):
+            raise Abort("Đã huỷ. cd vào thư mục project rồi chạy lại.", 0)
+    rec_new = {"agent": agent, "scope": scope, "path": str(path)}
+    items = installs()
+    old = next((r for r in items if same(r, rec_new)), None)
+    bundle = ensure_bundle()
+    rec = SETUP[agent](bundle, scope, path, old, True)
+    items = [r for r in items if not same(r, rec)] + [rec]
+    save_installs(items)
+    print(f"{'Đã cài lại' if old else 'Đã cài'} xora-dev cho {AGENTS[agent]}: {label(rec).strip()}")
+    if any(r["agent"] == agent and r["scope"] == "global" for r in items) and \
+            any(r["agent"] == agent and r["scope"] == "local" and r["path"] == str(cwd) for r in items):
+        print("Lưu ý: đã có cả Global và Local ở project này; bản Local được dùng, Global là thừa ở đây.")
+    tip = "mở phiên Kiro mới" if agent == "kiro" else "mở phiên Claude Code mới (chấp nhận MCP server xora-dev nếu được hỏi)"
+    print(f"Tiếp theo: {tip}." + ("" if tokens() else " Chưa đăng nhập: chạy xdlc login."))
+
+
+def cmd_remove(argv):
+    agent = options(argv, ("agent",)).get("agent")
+    items = installs()
+    cands = [r for r in items if not agent or r["agent"] == agent]
+    if not cands:
+        raise Abort(f"Chưa setup {AGENTS[agent] if agent else 'xora-dev'} ở đâu.", 0)
+    cwd = str(Path.cwd())
+    if len(cands) == 1:
+        chosen = cands
+        if not confirm(f"Gỡ {label(cands[0]).strip()}?"):
+            raise Abort("Đã huỷ.", 0)
+    else:
+        labels = [label(r) + ("   ← thư mục hiện tại" if r["scope"] != "global" and r["path"] == cwd else "")
+                  for r in cands]
+        if arrow_keys():
+            idx = menu("Chọn mục cần gỡ:", labels, multi=True)
+        else:
+            print("Chọn mục cần gỡ (vd: 1,3 | 1-2 | all):")
+            for i, text in enumerate(labels, 1):
+                print(f"  {i}) {text}")
+            while (idx := pick_many(len(cands), ask("> "))) is None:
+                print("Nhập số, khoảng hoặc all.")
+        chosen = [cands[i] for i in idx]
+        print("Sẽ gỡ:")
+        for r in chosen:
+            what = (f"{len(r.get('files', {}))} file trong .kiro/, khối {SERVER} trong {r['mcp_json']}"
+                    if r["agent"] == "kiro" else f"plugin {SERVER} (scope {CLAUDE_SCOPE[r['scope']]})")
+            print(f"  - {label(r).strip()}: {what}")
+        if not confirm("Tiếp tục?"):
+            raise Abort("Đã huỷ.", 0)
+    for r in chosen:
+        REMOVE[r["agent"]](r, True)
+        items = [x for x in items if not same(x, r)]
+        save_installs(items)
+        print(f"Đã gỡ {label(r).strip()}")
+    after_claude_removed(items)
+    if not items:
+        shutil.rmtree(BUNDLE, ignore_errors=True)
+
+
+class _Callback(http.server.BaseHTTPRequestHandler):
+    result = {}
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        u = urllib.parse.urlsplit(self.path)
+        if u.path != "/oauth/callback":
+            self.send_response(404)
+            self.end_headers()
+            return
+        _Callback.result.update({k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()})
+        ok = "code" in _Callback.result
+        page = ("<h2>Đã đăng nhập Xora DLC</h2><p>Quay lại terminal.</p>" if ok else
+                f"<h2>Đăng nhập không thành công</h2><p>{_Callback.result.get('error', '')}</p>")
+        data = f"<!doctype html><meta charset=utf-8><body style='font-family:sans-serif'>{page}".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def cmd_login(argv):
+    if argv:
+        raise Abort("login không có tuỳ chọn.", 2)
+    c = config()
+    base = base_url(c)
+    status, meta = request("GET", base + "/.well-known/oauth-authorization-server")
+    if status != 200 or not isinstance(meta, dict):
+        raise Abort(f"Không lấy được thông tin đăng nhập của {base} ({meta if status == 0 else 'HTTP ' + str(status)}).")
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    state = secrets.token_urlsafe(16)
+    _Callback.result = {}
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Callback)
+    redirect = f"http://127.0.0.1:{srv.server_port}/oauth/callback"
+    url = meta["authorization_endpoint"] + "?" + urllib.parse.urlencode({
+        "response_type": "code", "client_id": CLIENT_ID, "redirect_uri": redirect,
+        "code_challenge": challenge, "code_challenge_method": "S256", "state": state})
+    print(f"Đăng nhập Xora DLC ({c['env']}: {base}). Mở trang sau nếu trình duyệt không tự mở:\n{url}", flush=True)
+    if not os.environ.get("XDLC_NO_BROWSER"):
+        webbrowser.open(url)
+    srv.timeout = 1
+    deadline = time.time() + 300
+    while not _Callback.result and time.time() < deadline:
+        srv.handle_request()
+    srv.server_close()
+    res = _Callback.result
+    if not res:
+        raise Abort("Hết 5 phút mà chưa đăng nhập xong. Chạy lại xdlc login.")
+    if res.get("state") != state:
+        raise Abort("Phản hồi đăng nhập không khớp (state). Chạy lại xdlc login.")
+    if "code" not in res:
+        raise Abort(f"Đăng nhập không thành công: {res.get('error_description') or res.get('error')}")
+    status, out = request("POST", meta["token_endpoint"], form={
+        "grant_type": "authorization_code", "code": res["code"], "redirect_uri": redirect,
+        "client_id": CLIENT_ID, "code_verifier": verifier})
+    if status != 200 or not isinstance(out, dict) or not out.get("access_token"):
+        raise Abort(f"Đổi mã lấy token không thành công: {out}")
+    _store(c["env"], out)
+    u, why = whoami()
+    print("Đã đăng nhập: " + (account_line(u) if u else f"(không đọc được tài khoản: {why})"))
+    if u and not u.get("role"):
+        print("Tài khoản chưa có vai: nhờ admin Xora DLC gán vai (vd. DEV) thì mới hỏi agent được.")
+    print("Không phải tài khoản này? Đăng xuất web Xora DLC trong trình duyệt, chạy xdlc logout rồi xdlc login.")
+
+
+def cmd_logout(argv):
+    if argv:
+        raise Abort("logout không có tuỳ chọn.", 2)
+    c = config()
+    if not tokens(c["env"]):
+        print(f"Chưa đăng nhập ({c['env']}).")
+        return
+    save_tokens(c["env"], None)
+    print(f"Đã đăng xuất Xora DLC ({c['env']}: {base_url(c)}). Agent cần đăng nhập lại qua xdlc login.")
+
+
+def cmd_status(argv):
+    if argv:
+        raise Abort("status không có tuỳ chọn.", 2)
+    c = config()
+    print(f"xdlc {VERSION} · plugin {bundle_version() or 'chưa tải'}")
+    print(f"Backend: {c['env']}  {base_url(c)}")
+    u, why = whoami()
+    t = tokens(c["env"])
+    exp = time.strftime("%H:%M %d/%m", time.localtime(t["expires_at"])) if t else ""
+    print("Tài khoản: " + (f"{account_line(u)} · token hết hạn {exp} (tự làm mới)" if u else why))
+    items = installs()
+    print("Đã setup:" + ("" if items else " chưa có (chạy xdlc setup)"))
+    for i, r in enumerate(items, 1):
+        print(f"  {i}) {label(r)}   v{r.get('version') or '?'}")
+
+
+def cmd_use(argv):
+    c = config()
+    if not argv:
+        print(f"Đang dùng: {c['env']}  {base_url(c)}")
+        print("Đổi: xdlc use prod | xdlc use local [--url URL]")
+        return
+    env, rest = argv[0], argv[1:]
+    if env not in ("prod", "local"):
+        raise Abort("xdlc use prod | xdlc use local [--url URL]", 2)
+    if rest:
+        if env != "local" or len(rest) != 2 or rest[0] != "--url" or not rest[1].startswith(("http://", "https://")):
+            raise Abort("--url chỉ dùng với local, vd: xdlc use local --url http://localhost:9000", 2)
+        c["local_url"] = rest[1].rstrip("/")
+    changed = env != c["env"] or bool(rest)
+    c["env"] = env
+    save_json(XDLC / "config.json", c)
+    print(f"Đang dùng: {env}  {base_url(c)}")
+    if not tokens(env):
+        print("Chưa đăng nhập backend này: chạy xdlc login.")
+    if changed:
+        print("Mở phiên agent mới (hoặc reconnect xora-dev trong /mcp) để agent dùng backend mới.")
+
+
+def reapply(items, interactive):
+    bundle = BUNDLE / "agents-plugin"
+    done = []
+    for r in items:
+        if r["scope"] != "global" and not Path(r["path"]).is_dir():
+            print(f"  Bỏ qua {label(r).strip()}: thư mục không còn.")
+            done.append(r)
+            continue
+        try:
+            done.append(SETUP[r["agent"]](bundle, r["scope"], r["path"], r, interactive))
+            print(f"  Đã cập nhật {label(r).strip()}")
+        except Abort as e:
+            print(f"  Lỗi khi cập nhật {label(r).strip()}: {e}")
+            done.append(r)
+    save_installs(done)
+
+
+def cmd_update(argv):
+    if argv:
+        raise Abort("update không có tuỳ chọn.", 2)
+    ref = os.environ.get("XDLC_REF")
+    if not ref and not os.environ.get("XDLC_PLUGIN_DIR"):
+        ref = latest_release()
+        if not ref:
+            raise Abort("Chưa có bản phát hành (tag vX.Y.Z) hoặc không hỏi được GitHub.")
+        if _semver(ref) <= _semver(VERSION) and bundle_version() == VERSION:
+            print(f"Đang là bản mới nhất ({VERSION}).")
+            return
+    src = fetch_bundle(ref)
+    new_cli = src / "xdlc"
+    if not new_cli.is_file():
+        raise Abort("Bản tải về không có xdlc.")
+    target = xdlc_path()
+    tmp = target.with_name(target.name + ".new")
+    shutil.copyfile(new_cli, tmp)
+    os.chmod(tmp, 0o755)
+    install_bundle(src)
+    os.replace(tmp, target)
+    print(f"Đã cập nhật xdlc và plugin ({ref or 'bản local'}). Cài lại vào các chỗ đã setup:")
+    # Bản mới tự cài lại, để logic cài là của bản mới.
+    os.execv(sys.executable, [sys.executable, str(target), "_reapply"])
+
+
+def cmd_version(argv):
+    print(f"xdlc {VERSION}")
+    print(f"plugin {bundle_version() or 'chưa tải (chạy xdlc setup)'}")
+    for r in installs():
+        print(f"  {label(r)}   v{r.get('version') or '?'}")
+    latest = latest_release()
+    if latest and _semver(latest) > _semver(VERSION):
+        print(f"Có bản mới {latest}: chạy xdlc update.")
+
+
+def cmd_uninstall(argv):
+    if argv:
+        raise Abort("uninstall không có tuỳ chọn.", 2)
+    items = installs()
+    print("Sẽ gỡ toàn bộ Xora DLC khỏi máy:")
+    for r in items:
+        print(f"  - setup: {label(r).strip()}")
+    print(f"  - token đăng nhập, cấu hình và gói plugin: {short(XDLC)}")
+    print(f"  - lệnh xdlc: {short(xdlc_path())}")
+    if not confirm("Tiếp tục?"):
+        raise Abort("Đã huỷ.", 0)
+    for r in items:
+        REMOVE[r["agent"]](r, True)
+        print(f"Đã gỡ {label(r).strip()}")
+    after_claude_removed([])
+    shutil.rmtree(XDLC, ignore_errors=True)
+    if xdlc_path() == BIN and BIN.is_file():
+        BIN.unlink()
+    print("Đã gỡ Xora DLC. Cài lại: curl -fsSL https://raw.githubusercontent.com/"
+          f"{REPO}/main/install.sh | sh")
+
+
+# ── MCP server cục bộ cho agent ─────────────────────────────────────────────────────────────────────────
+
+def _local_answer(msg, reason):
+    m, mid = msg.get("method"), msg.get("id")
+    if m == "initialize":
+        asked = (msg.get("params") or {}).get("protocolVersion")
+        result = {"protocolVersion": asked or "2025-06-18", "capabilities": {"tools": {"listChanged": False}},
+                  "serverInfo": {"name": "xoradlc", "version": VERSION}}
+    elif m == "ping":
+        result = {}
+    elif m == "tools/list":
+        result = {"tools": [ASK_TOOL]}
+    elif m == "tools/call":
+        result = {"content": [{"type": "text", "text": reason}], "isError": True}
+    else:
+        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method not found: {m}"}}
+    return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+
+def _forward(msg):
+    c = config()
+    url = base_url(c) + "/mcp/user"
+    token = access_token()
+    if token:
+        status, out = request("POST", url, body=msg, token=token, timeout=600)
+        if status == 401:
+            token = access_token(force_refresh=True)
+            if token:
+                status, out = request("POST", url, body=msg, token=token, timeout=600)
+        if status == 202 or (status == 200 and "id" not in msg):
+            return None
+        if status == 200 and isinstance(out, dict):
+            return out
+        if status == 0:
+            reason = f"Không kết nối được Xora DLC ({base_url(c)}): {out}. Kiểm tra mạng / backend rồi hỏi lại."
+        elif status == 401:
+            reason = f"Phiên đăng nhập Xora DLC ({c['env']}) đã hết. Chạy `xdlc login` trong terminal rồi hỏi lại."
+        else:
+            reason = f"Xora DLC trả lỗi HTTP {status}: {out}"
+    else:
+        reason = (f"Chưa đăng nhập Xora DLC ({c['env']}: {base_url(c)}). "
+                  "Chạy `xdlc login` trong terminal rồi hỏi lại.")
+    if "id" not in msg:
+        return None
+    return _local_answer(msg, reason)
+
+
+def cmd_mcp(argv):
+    """stdio JSON-RPC ↔ <backend>/mcp/user. Mỗi yêu cầu một luồng: một xora_ask lâu không chặn ping."""
+    out_lock = threading.Lock()
+
+    def handle(line):
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            return
+        try:
+            resp = _forward(msg)
+        except Exception as e:  # không để một lỗi làm chết server của agent
+            resp = None if "id" not in msg else {"jsonrpc": "2.0", "id": msg["id"],
+                                                 "error": {"code": -32603, "message": f"xdlc: {e}"}}
+        if resp is not None:
+            with out_lock:
+                sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
+                sys.stdout.flush()
+
+    threads = []
+    for line in sys.stdin:
+        if line.strip():
+            t = threading.Thread(target=handle, args=(line,), daemon=True)
+            t.start()
+            threads.append(t)
+    for t in threads:
+        t.join()
+
+
+def cmd_reapply(argv):
+    reapply(installs(), interactive=False)
+
+
+COMMANDS = {"setup": cmd_setup, "remove": cmd_remove, "login": cmd_login, "logout": cmd_logout,
+            "status": cmd_status, "use": cmd_use, "update": cmd_update, "version": cmd_version,
+            "uninstall": cmd_uninstall}
+HIDDEN = {"mcp": cmd_mcp, "_reapply": cmd_reapply}
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        if len(argv) == 2 and argv[1] in CMD_HELP:
+            print(CMD_HELP[argv[1]])
+        else:
+            print(HELP.format(v=VERSION).rstrip())
+        return 0
+    if argv[0] in ("-v", "--version"):
+        argv = ["version"]
+    cmd, rest = argv[0], argv[1:]
+    if cmd in COMMANDS and rest[:1] in (["-h"], ["--help"]):
+        print(CMD_HELP[cmd])
+        return 0
+    fn = COMMANDS.get(cmd) or HIDDEN.get(cmd)
+    if not fn:
+        err(f"xdlc: không có lệnh '{cmd}'.\n")
+        err(HELP.format(v=VERSION).rstrip())
+        return 2
+    try:
+        fn(rest)
+    except Abort as e:
+        (print if e.code == 0 else err)(str(e) if e.code == 0 else f"xdlc: {e}")
+        return e.code
+    except KeyboardInterrupt:
+        err("\nĐã huỷ.")
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

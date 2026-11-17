@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "xora-dev": {
-      "url": "https://xoradlc-platform-api.techxcorp.com/mcp/user",
-      "oauth": {
-        "clientId": "xora-plugin"
-      },
+      "command": "xdlc",
+      "args": ["mcp"],
       "disabled": false,
       "autoApprove": []
     }

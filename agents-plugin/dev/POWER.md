@@ -21,4 +21,4 @@ Developer hiện thực theo thiết kế đã duyệt, lập hồ sơ changeset
 
 ## MCP server `xora-dev`
 
-MCP từ xa của Xora DLC (`https://xoradlc-platform-api.techxcorp.com/mcp/user`), đăng nhập bằng OAuth: lần đầu Kiro mở trình duyệt tới trang đăng nhập Xora DLC (SSO hoặc tài khoản local). Một tool `xora_ask`: Xora DLC chuyển câu hỏi cho agent AAP của vai người dùng, AAP tự gọi các function của Xora DLC. Không có key nào trên máy.
+Lệnh `xdlc mcp` trên máy (stdio), chuyển yêu cầu tới `<backend>/mcp/user` của Xora DLC kèm token đăng nhập mà `xdlc` giữ (`xdlc login`). Một tool `xora_ask`: Xora DLC chuyển câu hỏi cho agent AAP của vai người dùng, AAP tự gọi các function của Xora DLC. Cài bằng `xdlc setup`; không có key nào phải dán.

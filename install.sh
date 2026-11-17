@@ -1,47 +1,52 @@
 #!/bin/sh
-# Cài plugin xora-dev (vai Developer) cho Kiro CLI hoặc Claude Code, một lệnh:
-#   curl -fsSL https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.sh | sh -s -- kiro <workspace>
-#   curl -fsSL https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.sh | sh -s -- kiro --global
-#   curl -fsSL https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.sh | sh -s -- claude [user|project|local]
-# Không cần key: lần đầu dùng, Kiro / Claude mở trình duyệt để đăng nhập Xora DLC (SSO hoặc tài khoản local).
-# Tuỳ chọn: XORA_URL (backend khác, vd. http://localhost:8000), XORA_PLUGIN_REF (nhánh / tag, mặc định main),
-#           XORA_PLUGIN_DIR (dùng bản clone có sẵn thay vì tải về).
+# Cài lệnh xdlc (Xora DLC cho Claude Code và Kiro CLI): một file, vào ~/.local/bin.
+#   curl -fsSL https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.sh | sh
+# Sau đó: xdlc setup, xdlc login. Tuỳ chọn: XDLC_BIN_DIR (thư mục cài), XDLC_REF (nhánh / tag),
+# XDLC_PLUGIN_DIR (lấy xdlc từ bản clone có sẵn thay vì tải về).
 set -eu
 
-TOOL="${1:-}"; TARGET="${2:-}"
-REF="${XORA_PLUGIN_REF:-main}"
-HOME_DIR="$HOME/.xora/plugin"  # bản plugin cố định: Claude Code nạp marketplace tại chỗ từ đây
+REPO="TechX-Corp/xoradlc-plugin"
+BIN_DIR="${XDLC_BIN_DIR:-$HOME/.local/bin}"
+die() { echo "xdlc: $*" >&2; exit 1; }
 
-die() { echo "xora-dev: $*" >&2; exit 1; }
-need() { command -v "$1" >/dev/null 2>&1 || die "cần '$1' trên máy"; }
+command -v python3 >/dev/null 2>&1 || die "cần python3 (3.9 trở lên)"
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' || die "cần python3 3.9 trở lên"
+mkdir -p "$BIN_DIR"
+TMP="$BIN_DIR/.xdlc.download"
+trap 'rm -f "$TMP"' EXIT
 
-case "$TOOL" in
-  kiro) [ -n "$TARGET" ] || die "kiro cần <workspace> hoặc --global" ;;
-  claude) TARGET="${TARGET:-user}"
-          case "$TARGET" in user|project|local) ;; *) die "claude: scope là user, project hoặc local" ;; esac ;;
-  *) die "Dùng: install.sh kiro <workspace>|--global   hoặc   install.sh claude [user|project|local]" ;;
+if [ -n "${XDLC_PLUGIN_DIR:-}" ]; then
+  cp "$XDLC_PLUGIN_DIR/xdlc" "$TMP"
+else
+  command -v curl >/dev/null 2>&1 || die "cần curl"
+  REF="${XDLC_REF:-}"
+  if [ -z "$REF" ]; then  # bản phát hành mới nhất (tag vX.Y.Z), chưa có thì main
+    REF=$(curl -fsSL "https://api.github.com/repos/$REPO/tags?per_page=100" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    tags = [t["name"] for t in json.load(sys.stdin)]
+except Exception:
+    tags = []
+v = []
+for t in tags:
+    try:
+        n = tuple(int(x) for x in t.lstrip("v").split("."))
+    except ValueError:
+        continue
+    if len(n) == 3:
+        v.append((n, t))
+print(max(v)[1] if v else "main")') || REF=main
+  fi
+  curl -fsSL "https://raw.githubusercontent.com/$REPO/$REF/xdlc" -o "$TMP" || die "không tải được xdlc ($REF)"
+fi
+python3 -m py_compile "$TMP" 2>/dev/null || die "file xdlc tải về không hợp lệ"
+rm -rf "$BIN_DIR/__pycache__"
+chmod 755 "$TMP"
+mv "$TMP" "$BIN_DIR/xdlc"
+
+echo "Đã cài $("$BIN_DIR/xdlc" --version | head -1) vào $BIN_DIR/xdlc"
+case ":$PATH:" in
+  *":$BIN_DIR:"*) echo "Tiếp theo: xdlc setup (cài cho Kiro hoặc Claude Code), rồi xdlc login." ;;
+  *) echo "Thêm $BIN_DIR vào PATH, ví dụ: echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc && exec zsh"
+     echo "Sau đó: xdlc setup, rồi xdlc login." ;;
 esac
-need python3
-
-# 1. Lấy plugin: bản clone có sẵn, hoặc tải gói của nhánh REF từ GitHub (repo public, không cần token).
-if [ -n "${XORA_PLUGIN_DIR:-}" ]; then
-  SRC="$(cd "$XORA_PLUGIN_DIR" && pwd)"
-else
-  need curl; need tar
-  TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-  curl -fsSL "https://codeload.github.com/TechX-Corp/xoradlc-plugin/tar.gz/$REF" | tar -xz -C "$TMP"
-  rm -rf "$HOME_DIR" && mkdir -p "$(dirname "$HOME_DIR")"
-  mv "$TMP"/xoradlc-plugin-* "$HOME_DIR"
-  SRC="$HOME_DIR"
-fi
-[ -f "$SRC/agents-plugin/install-kiro.sh" ] || die "không thấy agents-plugin/ trong $SRC"
-
-# 2. Cài cho công cụ đã chọn.
-if [ "$TOOL" = kiro ]; then
-  sh "$SRC/agents-plugin/install-kiro.sh" dev "$TARGET"
-else
-  need claude
-  claude plugin marketplace add "$SRC/agents-plugin" >/dev/null 2>&1 || claude plugin marketplace update xora-role-plugins
-  claude plugin install xora-dev@xora-role-plugins --scope "$TARGET"
-  echo "Đã cài xora-dev cho Claude Code (scope $TARGET). Trong Claude Code gõ /mcp để đăng nhập Xora DLC lần đầu."
-fi

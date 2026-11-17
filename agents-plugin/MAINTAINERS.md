@@ -1,38 +1,38 @@
-# Ghi chú cho người bảo trì
+# Notes for maintainers
 
-Phần này không cần cho người dùng plugin; hướng dẫn dùng ở [README.md](README.md).
+This file is not needed by plugin users; see [README.md](README.md) for usage.
 
-## Cách plugin chạy
+## How the plugin runs
 
-- `xdlc` (một file Python ở gốc repo) cài plugin `xora-dev` (`dev/`) cho Kiro CLI hoặc Claude Code, giữ token OAuth trong `~/.xdlc/auth.json` (Windows: DPAPI) và chạy MCP server cục bộ `xdlc mcp` (stdio). `xdlc mcp` chuyển mọi yêu cầu tới `<backend>/mcp/user` kèm token.
-- Tool `xora_ask`: backend Xora DLC nhận câu hỏi như chat trên web, gắn vai và phiên MCP rồi chuyển cho agent AAP của vai đó; AAP tự chọn function MCP của Xora DLC.
-- Sensor convention: [dev/README.md](dev/README.md#sensor-chạy-thế-nào). Gửi cảnh báo khi push: [dev/README.md](dev/README.md#gửi-cảnh-báo-về-xora-dlc).
+- `xdlc` (a single Python file at the repo root) installs the `xora-dev` plugin (`dev/`) for Kiro CLI or Claude Code, stores the OAuth token in `~/.xdlc/auth.json` (Windows: DPAPI), and runs a local MCP server `xdlc mcp` (stdio). `xdlc mcp` forwards every request to `<backend>/mcp/user` with the token.
+- Tool `xora_ask`: the Xora DLC backend takes the question like web chat, attaches the role and MCP session, then hands it to that role’s AAP agent; AAP picks Xora DLC MCP functions itself.
+- The convention sensor runs right after install with no extra steps: if the repo has `convention.md` (at the root or under `docs/`), it uses the repo rules; otherwise it uses the plugin default (currently no rules; more will be added later). Details: [dev/README.md](dev/README.md#sensor-chạy-thế-nào). Alerts on push: [dev/README.md](dev/README.md#gửi-cảnh-báo-về-xora-dlc).
 
-## Kiểm tra trước khi mở PR
+## Checks before opening a PR
 
 ```bash
 python3 agents-plugin/test_roles.py
 claude plugin validate agents-plugin/dev
 ```
 
-CI (`.github/workflows/xdlc-plugin-tests.yml`) chạy `test_roles.py` trên Ubuntu, macOS, Windows với Python 3.9 và 3.13. Mục "Các lệnh" của README phải khớp đúng output của `xdlc` (test kiểm). `install.ps1` chỉ được có ký tự ASCII (PowerShell 5.1 đọc theo ANSI).
+CI (`.github/workflows/xdlc-plugin-tests.yml`) runs `test_roles.py` on Ubuntu, macOS, and Windows with Python 3.9 and 3.13. The README “Commands” section must match `xdlc` output exactly (the test checks this). `install.ps1` must stay ASCII-only (PowerShell 5.1 reads it as ANSI).
 
-## Phát hành
+## Releasing
 
-1. Tăng `VERSION` trong `xdlc` và `version` trong `.claude-plugin/marketplace.json` (phải khớp, test kiểm).
-2. Merge vào `main`, tạo tag `vX.Y.Z`. `install.sh` / `install.ps1` và `xdlc update` lấy tag mới nhất.
+1. Bump `VERSION` in `xdlc` and `version` in `.claude-plugin/marketplace.json` (must match; the test checks).
+2. Merge to `main`, create tag `vX.Y.Z`. `install.sh` / `install.ps1` and `xdlc update` use the latest tag.
 
-Thử bản chưa phát hành: `XDLC_REF=<nhánh> xdlc update`, hoặc `XDLC_PLUGIN_DIR=<bản clone>` cho `install.sh` / `install.ps1` / `xdlc setup` / `xdlc update`.
+Try a pre-release build: `XDLC_REF=<branch> xdlc update`, or `XDLC_PLUGIN_DIR=<clone>` for `install.sh` / `install.ps1` / `xdlc setup` / `xdlc update`.
 
-## Các vai đã lưu trữ
+## Archived roles
 
-`ba`, `techlead`, `qa`, `reviewer`, `delivery` ở [archived/](archived/), không có trong marketplace và không được kiểm. Dùng lại: chuyển thư mục về cạnh `dev/`, đổi `.mcp.json` và `mcp.json` sang `xdlc mcp` như `dev/`, thêm vào `kiro_files` của `xdlc`, `marketplace.json` và `ROLES` trong `test_roles.py`.
+`ba`, `techlead`, `qa`, `reviewer`, `delivery` live under [archived/](archived/), are not in the marketplace, and are not tested. To revive one: move the folder next to `dev/`, point `.mcp.json` and `mcp.json` at `xdlc mcp` like `dev/`, and add it to `kiro_files` in `xdlc`, `marketplace.json`, and `ROLES` in `test_roles.py`.
 
-## Giới hạn đã biết
+## Known limitations
 
-- `dev/convention.md` là convention mặc định (sensor dùng khi repo không có file riêng): hiện `rules` rỗng, sẽ bổ sung sau.
+- `dev/convention.md` is the default convention (used when the repo has no file of its own): `rules` is currently empty; more will be added later.
 
-- `xora_ask` nhận tối đa 3.800 ký tự (giới hạn `question` của backend): `upload-tech-doc` chỉ lưu được tài liệu ngắn hoặc phải tách phần.
-- Mỗi lần push gửi lại mọi cảnh báo còn lại: backend chưa gộp alert trùng, chưa tự đóng alert khi lỗi đã sửa.
-- Pre-push kiểm bản trong thư mục làm việc của các file thay đổi, không phải đúng bản trong commit được push.
-- Backend không giữ danh sách token: muốn chặn hẳn một người thì khoá tài khoản.
+- `xora_ask` accepts at most 3,800 characters (backend `question` limit): `upload-tech-doc` only works for short docs or you must split them.
+- Every push re-sends all remaining alerts: the backend does not dedupe alerts or auto-close them when fixed.
+- Pre-push checks the working-tree version of changed files, not necessarily the exact bytes in the commit being pushed.
+- The backend does not keep a token list: to fully block someone, lock the account.

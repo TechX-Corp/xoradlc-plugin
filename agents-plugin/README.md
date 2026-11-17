@@ -1,128 +1,140 @@
-# Xora DLC cho Claude Code và Kiro CLI
+# Xora DLC for Claude Code and Kiro CLI
 
-Plugin `xora-dev` đưa Xora DLC vào agent bạn đang dùng để code (Kiro CLI hoặc Claude Code), cài và quản lý bằng lệnh `xdlc`:
+The `xora-dev` plugin brings Xora DLC into the coding agent you already use (Kiro CLI or Claude Code). Install and manage it with `xdlc`:
 
-- **Hỏi Xora DLC ngay trong agent**: việc của tôi, trạng thái work order, BRD / thiết kế của bước, open question, convention và tiền lệ nội bộ; câu trả lời có trích dẫn.
-- **Quy chuẩn làm việc có sẵn**: skill `implement` (code theo BRD / thiết kế đã duyệt), `changeset` (hồ sơ PR), `upload-tech-doc` (lưu tài liệu vào KB), cùng rule cho agent.
-- **Kiểm convention**: sau mỗi lần agent sửa code, sensor kiểm theo `convention.md` của repo và cảnh báo; khi `git push`, cảnh báo được gửi về màn hình Governance của Xora DLC.
+- **Ask Xora DLC from the agent**: my work, work-order status, step BRD / design, open questions, conventions and internal precedents; answers include citations.
+- **Ready-made working standards**: `implement` skill (code from approved BRD / design), `changeset` (PR dossier), `upload-tech-doc` (save docs to the KB), plus agent rules.
+- **Convention checks**: after the agent edits code, the sensor checks the repo `convention.md` and warns; on `git push`, alerts go to the Xora DLC Governance screen.
 
-## Cần có trước khi cài
+## Prerequisites
 
-| | Yêu cầu |
+| | Requirement |
 |---|---|
-| Hệ điều hành | macOS, Linux, Windows 10/11 (hoặc WSL) |
-| Python | 3.9 trở lên (`python3` trên macOS / Linux, `py` hoặc `python` trên Windows) |
-| git | Bản bất kỳ còn hỗ trợ |
-| Agent | **Kiro CLI** (`kiro-cli`) hoặc **Claude Code** (`claude`). Claude Code trên Windows cần Git for Windows. Kiro CLI trên Windows gốc chưa được kiểm: nếu chỉ chạy được trong WSL thì cài `xdlc` trong WSL |
-| Tài khoản | Tài khoản Xora DLC (SSO hoặc tài khoản local, như trên web) có vai được hỏi agent, vd. DEV |
-| Terminal | macOS / Linux: `curl`. Windows: PowerShell (có sẵn); nên dùng Windows Terminal |
+| OS | macOS, Linux, Windows 10/11 (or WSL) |
+| Python | 3.9+ (`python3` on macOS / Linux, `py` or `python` on Windows) |
+| git | Any supported version |
+| Agent | **Kiro CLI** (`kiro-cli`) or **Claude Code** (`claude`). Claude Code on Windows needs Git for Windows. Kiro CLI on native Windows is untested: if it only runs in WSL, install `xdlc` in WSL |
+| Account | An Xora DLC account (SSO or local, same as the web) with a role the agent can query, e.g. DEV |
+| Terminal | macOS / Linux: `curl`. Windows: PowerShell (built-in); prefer Windows Terminal |
 
-## Cài đặt
+## Install
 
-Cài lệnh `xdlc` (một file). Gặp lỗi: xem [Lỗi thường gặp khi cài](#lỗi-thường-gặp-khi-cài).
+Install the `xdlc` command (one file).
 
-**macOS / Linux / WSL** (cài vào `~/.local/bin`):
+**macOS / Linux / WSL** (installs to `~/.local/bin`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.sh | sh
 ```
 
-**Windows** (PowerShell hoặc cmd; cài vào `%LOCALAPPDATA%\Programs\xdlc`, tự thêm vào `PATH`):
+**Windows** (PowerShell or cmd; installs to `%LOCALAPPDATA%\Programs\xdlc`, adds it to `PATH`):
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.ps1 | iex"
 ```
 
-Kiểm tra (mở terminal mới nếu vừa cài):
+Check:
 
 ```bash
 xdlc --version
 ```
 
-## Bắt đầu nhanh
+If something fails: see [Common install issues](#common-install-issues).
 
-**1. Cài plugin cho agent.** Chọn một trong hai:
+## Quick start
 
-Cho project đang làm (cd vào thư mục project trước):
+**1. Install the plugin for your agent.** Pick one:
+
+For the project you are working on (`cd` into the project first):
 
 ```bash
 cd ~/your-project
 xdlc setup --agent kiro --scope local
 ```
 
-Cho mọi repo trên máy:
+For every repo on this machine:
 
 ```bash
 xdlc setup --agent kiro --scope global
 ```
 
-| Flag | Giá trị | Nghĩa |
+| Flag | Value | Meaning |
 |---|---|---|
 | `-a`, `--agent` | `kiro` | Kiro CLI |
 | | `claude` | Claude Code |
-| `-s`, `--scope` | `local` | Chỉ project hiện tại; git không theo dõi file của `xdlc`. Cài thêm hook `git push` để gửi cảnh báo convention về Xora DLC |
-| | `global` | Mọi repo trên máy |
+| `-s`, `--scope` | `local` | Current project only; git does not track `xdlc` files. Also installs a `git push` hook to send convention alerts to Xora DLC |
+| | `global` | Every repo on this machine |
 
-Bỏ flag nào thì `xdlc` hỏi trên terminal (↑/↓ chọn, Enter xác nhận). Nếu file của plugin đã được team commit vào repo, `xdlc` hỏi gỡ khỏi git hay giữ nguyên.
+Omit a flag and `xdlc` asks in the terminal (↑/↓ to move, Enter to select). If the team already committed plugin files into the repo, `xdlc` asks whether to untrack them from git or keep them tracked.
 
-**2. Đăng nhập Xora DLC:**
+**2. Log in to Xora DLC:**
 
 ```bash
 xdlc login
 ```
 
-**3. Mở phiên agent mới trong project và hỏi**, ví dụ:
+**3. Open a new agent session in the project and ask**, for example:
 
-> Việc của tôi trên Xora DLC là gì?
+> What is my work on Xora DLC?
 
-**4. (Tuỳ chọn) Gửi cảnh báo convention về Xora DLC khi `git push`:** map nhánh hiện tại với bước bạn đang làm:
+**4. (Optional) Send convention alerts to Xora DLC on `git push`:** map the current branch to the step you are working on:
 
 ```bash
 xdlc link
 ```
 
-Sensor kiểm convention ngay sau khi cài, không cần thao tác thêm: repo có `convention.md` (ở gốc hoặc `docs/`) thì theo luật của repo, không có thì theo bản mặc định đi kèm plugin (hiện chưa có luật nào, sẽ bổ sung sau).
+## Commands
 
-## Các lệnh
-
-Gõ `xdlc` để xem danh sách này:
+Run `xdlc` to see this list:
 
 ```text
-xdlc 0.2.0: Xora DLC cho Claude Code và Kiro CLI
+xdlc 0.2.0: Xora DLC for Claude Code and Kiro CLI
 
-Cách dùng: xdlc <lệnh> [tuỳ chọn]
+Usage: xdlc <command> [options]
 
-Lệnh:
-  setup      Cài plugin xora-dev cho Kiro CLI hoặc Claude Code
-  remove     Gỡ một hay nhiều lần setup
-  link       Chọn work order cho nhánh hiện tại (sensor gửi cảnh báo khi git push)
-  login      Đăng nhập Xora DLC
-  logout     Đăng xuất Xora DLC trên máy này
-  status     Backend, tài khoản và vai đang đăng nhập, nơi đã setup
-  use        Chọn backend: bản deploy (prod) hoặc local
-  update     Cập nhật xdlc và plugin lên bản mới nhất
-  uninstall  Gỡ toàn bộ Xora DLC khỏi máy
+Commands:
+  setup      Install the xora-dev plugin for Kiro CLI or Claude Code
+  remove     Remove one or more setups
+  link       Pick a work order for the current branch (sensor sends alerts on git push)
+  login      Log in to Xora DLC
+  logout     Log out of Xora DLC on this machine
+  status     Backend, signed-in account and role, and where setup is installed
+  use        Choose backend: deployed (prod) or local
+  update     Update xdlc and the plugin to the latest release
+  uninstall  Remove Xora DLC entirely from this machine
 
-Tuỳ chọn:
-  -v, --version  Version đang cài và bản mới nhất
-  -h, --help     Danh sách lệnh này
+Options:
+  -v, --version  Installed version and latest release
+  -h, --help     This command list
 
-Viết tắt (bỏ qua câu hỏi trên terminal):
+Shortcuts (skip terminal prompts):
   xdlc setup -a, --agent kiro|claude  -s, --scope global|local
   xdlc remove -a, --agent kiro|claude
-  xdlc link [WO-…] [-t, --step BƯỚC] [-b, --branch NHÁNH] [-l, --list]
+  xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]
   xdlc use prod | xdlc use local [-u, --url URL]
 
-Scope: global = mọi repo trên máy; local = project hiện tại, git không theo dõi file của xdlc.
-Xem chi tiết một lệnh: xdlc <lệnh> --help
+Scope: global = every repo on this machine; local = current project, git does not track xdlc files.
+For details on one command: xdlc <command> --help
 ```
 
-## Lưu ý
+## Common install issues
 
-- Gặp lỗi (agent báo `forbidden`, không thấy MCP `xora-dev`…): chạy `xdlc status` để xem đang dùng tài khoản, vai nào và đã cài ở đâu.
-- Đăng nhập nhầm tài khoản: đăng xuất trên web Xora DLC, rồi chạy `xdlc logout` và `xdlc login`.
-- Sau khi chạy `xdlc use`: mở phiên agent mới.
-- Bấm ↑/↓ mà menu không đổi: đặt `XDLC_PLAIN=1` để chọn bằng cách gõ số.
+| Issue | Fix |
+|---|---|
+| macOS / Linux: `xdlc: command not found` | Add `~/.local/bin` to `PATH`: `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc` (bash: `~/.bashrc`), then open a new terminal |
+| Windows: `'xdlc' is not recognized` | Open a new terminal window. Still failing: check the user `PATH` includes `%LOCALAPPDATA%\Programs\xdlc` |
+| `python3 required` / `xdlc needs Python 3.9 or later` | Install Python 3.9+ (Windows: tick *Add python.exe to PATH*), open a new terminal, and run the install command again |
+| Windows: `Python was not found; run without arguments to install from the Microsoft Store` | That is the Microsoft Store stub: install real Python, or turn off *App execution aliases* for `python.exe` in Settings |
+| Windows: PowerShell blocks the script (ExecutionPolicy, AppLocker) | Use the install command above (includes `-ExecutionPolicy ByPass`). If a corporate machine still blocks it, ask IT |
+| `could not download xdlc` | Check network access to `raw.githubusercontent.com` (corporate proxies may block it) |
+| Menu does not move with ↑/↓ | Older consoles lack support: use Windows Terminal, or select by number (see [Notes](#notes)) |
+
+## Notes
+
+- Errors (agent reports `forbidden`, MCP `xora-dev` missing…): run `xdlc status` to see which account and role are in use and where setup is installed.
+- Wrong account: sign out on the Xora DLC web app, then run `xdlc logout` and `xdlc login`.
+- After `xdlc use`: open a new agent session.
+- If ↑/↓ does not change the menu: set `XDLC_PLAIN=1` to select by typing numbers.
 
   ```bash
   XDLC_PLAIN=1 xdlc setup
@@ -131,15 +143,3 @@ Xem chi tiết một lệnh: xdlc <lệnh> --help
   ```powershell
   $env:XDLC_PLAIN = "1"; xdlc setup
   ```
-
-## Lỗi thường gặp khi cài
-
-| Gặp | Xử lý |
-|---|---|
-| macOS / Linux: `xdlc: command not found` | Thêm `~/.local/bin` vào `PATH`: `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc` (bash: `~/.bashrc`), rồi mở terminal mới |
-| Windows: `'xdlc' is not recognized` | Mở cửa sổ terminal mới. Vẫn lỗi: kiểm `PATH` của user có `%LOCALAPPDATA%\Programs\xdlc` |
-| `cần python3` / `xdlc needs Python 3.9 or later` | Cài Python 3.9+ (Windows: chọn *Add python.exe to PATH*), mở terminal mới rồi chạy lại lệnh cài |
-| Windows: `Python was not found; run without arguments to install from the Microsoft Store` | Đó là bản giả của Microsoft Store: cài Python thật, hoặc tắt *App execution aliases* cho `python.exe` trong Settings |
-| Windows: PowerShell báo script bị chặn (ExecutionPolicy, AppLocker) | Dùng đúng lệnh cài ở trên (có `-ExecutionPolicy ByPass`). Máy công ty vẫn chặn thì nhờ IT |
-| `không tải được xdlc` | Kiểm mạng tới `raw.githubusercontent.com` (proxy công ty có thể chặn) |
-| Menu không đổi khi bấm ↑/↓ | Console cũ không hỗ trợ: dùng Windows Terminal, hoặc chọn bằng số (xem [Lưu ý](#lưu-ý)) |

@@ -19,15 +19,13 @@ The `xora-dev` plugin brings Xora DLC into the coding agent you already use (Kir
 
 ## Install
 
-Install the `xdlc` command (one file).
-
-**macOS / Linux / WSL** (installs to `~/.local/bin`):
+**macOS / Linux / WSL:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.sh | sh
 ```
 
-**Windows** (PowerShell or cmd; installs to `%LOCALAPPDATA%\Programs\xdlc`, adds it to `PATH`):
+**Windows** (PowerShell or cmd):
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/TechX-Corp/xoradlc-plugin/main/install.ps1 | iex"
@@ -73,15 +71,18 @@ Omit a flag and `xdlc` asks in the terminal (↑/↓ to move, Enter to select). 
 xdlc login
 ```
 
-**3. Open a new agent session in the project and ask**, for example:
-
-> What is my work on Xora DLC?
-
-**4. (Optional) Send convention alerts to Xora DLC on `git push`:** map the current branch to the step you are working on:
+**3. (Optional) Send convention alerts to Xora DLC on `git push`:** map the current branch to the step you are working on:
 
 ```bash
 xdlc link
 ```
+
+- **Local:** hook already installed; `xdlc link` maps the branch (or the first push asks). Skip → push may not send alerts.
+- **Global:** run `xdlc link` in the repo to install the hook and map. Skip → pushes never send alerts.
+
+**4. Open a new agent session in the project and ask**, for example:
+
+> What is my work on Xora DLC?
 
 ## Commands
 
@@ -136,9 +137,13 @@ For details on one command: xdlc <command> --help
 - After `xdlc use`: open a new agent session.
 - If ↑/↓ does not change the menu: set `XDLC_PLAIN=1` to select by typing numbers.
 
+  **macOS / Linux / WSL:**
+
   ```bash
   XDLC_PLAIN=1 xdlc setup
   ```
+
+  **Windows** (PowerShell):
 
   ```powershell
   $env:XDLC_PLAIN = "1"; xdlc setup

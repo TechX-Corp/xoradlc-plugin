@@ -244,7 +244,8 @@ class _Raw:
 
 
 def menu(title, labels, multi=False):
-    """↑/↓ move, Enter select; multi: Space mark, a = all. Esc / q cancel. → selected indices."""
+    """↑/↓ move, Enter select; multi: Space mark, a = all. Esc / q cancel. → selected indices.
+    Single: ◉/○ radio; multi: > focus + [ ]/[x]."""
     fd, n = sys.stdin.fileno(), len(labels)
     cols = shutil.get_terminal_size((80, 24)).columns
     width = cols - 1 if cols >= 40 else 10_000  # unknown width: do not truncate lines
@@ -257,8 +258,12 @@ def menu(title, labels, multi=False):
         if not first:
             out.write(f"\x1b[{n + 1}A")
         for i, text in enumerate(labels):
-            box = ("[x] " if i in marked else "[ ] ") if multi else ""
-            out.write("\r\x1b[2K" + f"{'>' if i == cur else ' '} {box}{text}"[:width] + "\n")
+            if multi:
+                box = "[x] " if i in marked else "[ ] "
+                prefix = f"{'>' if i == cur else ' '} {box}"
+            else:
+                prefix = "◉ " if i == cur else "○ "
+            out.write("\r\x1b[2K" + f"{prefix}{text}"[:width] + "\n")
         out.write("\r\x1b[2K" + (hint or tips)[:width] + "\n")
         out.flush()
 

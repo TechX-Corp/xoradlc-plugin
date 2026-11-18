@@ -58,17 +58,18 @@ Tool `xora_ask(text, session_id?)` gửi câu hỏi tới Xora DLC như chat tr�
 
 ## Sensor convention
 
-Mỗi khi code được tạo hoặc sửa, sensor kiểm theo `convention.md` ở gốc repo (không có thì theo bản mặc định của plugin) và **cảnh báo** — không chặn. Claude Code chạy sensor tự động qua hook `PostToolUse` sau mỗi lần Write / Edit; Kiro nhắc bạn chạy sau mỗi lần lưu file code; công cụ khác thì tự chạy sau mỗi lần ghi code:
+Chỉ khi Developer **yêu cầu commit hoặc push**: chạy kiểm convention. Không chạy sau mỗi lần sửa/lưu file. Không đọc `convention.md` local hay bản mặc định của plugin.
 
 ```sh
-xdlc sensor   # kiểm các file đang đổi trong git (--staged, --full, hoặc liệt kê file)
+xdlc sensor          # lấy convention dạng văn bản từ AAP/KB + danh sách file đang đổi
+xdlc sensor report   # gửi findings JSON (stdin) lên Xora DLC → gov alert (cần xdlc link)
 ```
 
-- Có cảnh báo → sửa ngay những vi phạm **trong phần code bạn vừa sinh / sửa**. Vi phạm ở code cũ → chỉ liệt kê cho Developer, không tự sửa lan ra.
-- Không tự thêm `convention-ignore` hay sửa `convention.md` để hết cảnh báo. Chỉ làm khi Developer đồng ý, và ghi vào mục *Nợ kỹ thuật* của changeset.
-- Kết quả sensor (số cảnh báo còn lại theo mã luật) đưa vào mục *Kết quả kiểm tại chỗ* của hồ sơ changeset.
-- Khi `git push`, hook pre-push của `xdlc` gửi các cảnh báo còn lại về Xora DLC, vào work order đã map với nhánh. Developer nhờ đổi work order của nhánh → `xdlc link --list` (xem map hiện tại và các bước có thể chọn), rồi `xdlc link <WO> [--step <bước>]`. Không tự chọn work order khi Developer chưa nói rõ; `xdlc link` không tham số mở menu, chỉ dùng được trong terminal của Developer.
-- Repo không có `convention.md` thì sensor dùng bản mặc định của plugin; không cần nhắc Developer tạo file. Không tự tạo hay tự đặt ra convention cho repo.
+1. Chạy `xdlc sensor` (cần đã `xdlc login`).
+2. Đọc convention in ra và so với thay đổi sắp commit/push; liệt kê chỗ lệch: file, dòng (nếu biết), `rule_code` ≤ 32 ký tự (có trong KB thì dùng; không thì slug ngắn kiểu `AAP-NL-001`), severity `red`/`yellow`, message.
+3. Hỏi Developer: **sửa ngay** hay **vẫn push**.
+4. Sửa → làm rồi kiểm lại nếu cần. Vẫn push → đưa findings JSON vào `xdlc sensor report` (stdin), rồi mới commit/push. Nhánh chưa map work order → `xdlc link` trước (`xdlc link --list`). Không tự chọn work order khi Developer chưa nói rõ.
+5. Developer tự `git push` trên terminal (không qua agent) thì plugin **không** kiểm convention.
 
 ## Dữ liệu nhạy cảm
 

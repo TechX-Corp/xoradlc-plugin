@@ -13,8 +13,9 @@ Developer hiện thực theo thiết kế đã duyệt, lập hồ sơ changeset
 ## Khi kích hoạt
 
 1. Đọc và làm theo `AGENTS.md` trong thư mục power — quy tắc của vai.
-2. Khi tạo hoặc sửa tài liệu tương ứng, áp dụng `steering/changeset-documents.md`.
-3. Chọn skill theo việc:
+2. Điều hướng MCP Xora DLC: `steering/xora-dlc-mcp-routing.md` (ưu tiên `xora-dev` / `xora_ask` cho ngữ cảnh Xora).
+3. Khi tạo hoặc sửa tài liệu tương ứng, áp dụng `steering/changeset-documents.md`.
+4. Chọn skill theo việc:
    - `changeset` → `skills/changeset/SKILL.md` — Lập, bổ sung hoặc rà soát hồ sơ changeset (mô tả PR / merge request) theo chuẩn ngân hàng
    - `implement` → `skills/implement/SKILL.md` — Hiện thực code, cấu hình, migration và test cho một yêu cầu ngân hàng theo BRD và thiết kế đã duyệt
    - `upload-tech-doc` → `skills/upload-tech-doc/SKILL.md` — Lưu một tài liệu (hồ sơ changeset, ghi chú thiết kế, ADR, runbook, convention) vào KB / S3 qua agent AAP bằng tool xora_ask

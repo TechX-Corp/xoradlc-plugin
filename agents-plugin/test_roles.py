@@ -36,46 +36,12 @@ def main():
 
 
 def check_sensor():
-    """Sensor convention của xora-dev: bắt vi phạm, tôn trọng convention-ignore, im lặng khi chưa có convention.md."""
-    sensor = ROOT / "dev" / "sensor" / "convention_sensor.py"
-    with tempfile.TemporaryDirectory() as tmp:
-        repo = Path(tmp)
-        subprocess.run(["git", "init", "-q", str(repo)], check=True)
-        bad = repo / "A.java"
-        bad.write_text('class A { void a(){ System.out.println("x"); }\n'
-                       '  String k = "abcdef123"; // convention-ignore: SEC-001 demo\n}\n', encoding="utf-8")
-        hook = lambda: subprocess.run([sys.executable, str(sensor), "--hook", "claude"], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                      input=json.dumps({"cwd": str(repo), "tool_input": {"file_path": str(bad)}})).stdout
-        assert hook() == "", "repo chưa có convention.md: dùng bản mặc định của plugin (chưa có luật) nên im lặng"
-        default = json.loads((ROOT / "dev" / "convention.md").read_text(encoding="utf-8").split("```json\n")[1].split("\n```")[0])
-        assert default == {"rules": []}, "convention mặc định: chưa có luật (bổ sung sau)"
-        out = subprocess.run([sys.executable, str(sensor)], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace")
-        assert "convention mặc định của plugin" in out.stdout, out.stdout + out.stderr
-        (repo / "convention.md").write_text((ROOT / "dev" / "convention.sample.md").read_text(encoding="utf-8"), encoding="utf-8")
-        ctx = json.loads(hook())["hookSpecificOutput"]["additionalContext"]
-        assert "[LOG-001]" in ctx and "SEC-001" not in ctx.split("\n- ", 1)[1], ctx
-
-        # Đã commit: forbid chỉ báo trên dòng đổi; --full báo cả code cũ; --staged chỉ xét phần đã staged.
-        g = lambda *a: subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a],
-                                      check=True, capture_output=True)
-        g("add", "."); g("commit", "-qm", "init")
-        cli = lambda *a: subprocess.run([sys.executable, str(sensor), *a], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
-        bad.write_text(bad.read_text(encoding="utf-8")[:-2] + "} // end\n", encoding="utf-8")  # chỉ sửa dòng 3
-        assert hook() == "", "chỉ sửa dòng khác (dòng 1 đã có vi phạm cũ) thì không báo code cũ"
-        assert "[LOG-001]" in cli("--full", str(bad))
-        bad.write_text(bad.read_text(encoding="utf-8") + 'class B { void b(){ System.out.println("y"); } }\n', encoding="utf-8")
-        assert "A.java:4 [LOG-001]" in cli(), "dòng mới thêm phải bị báo"
-        assert "[LOG-001]" not in cli("--staged"), "chưa staged thì --staged không báo"
-        g("add", "A.java")
-        bad.write_text("\n\n" + bad.read_text(encoding="utf-8"), encoding="utf-8")  # sửa thêm sau khi staged: số dòng working tree lệch với index
-        assert "A.java:4 [LOG-001]" in cli("--staged"), "--staged phải đọc bản trong index"
-
-        # Chỉ cảnh báo, không chặn: có vi phạm hay convention.md hỏng thì vẫn exit 0.
-        code = lambda *a: subprocess.run([sys.executable, str(sensor), *a], cwd=repo, capture_output=True).returncode
-        assert code() == 0, "có cảnh báo vẫn phải exit 0"
-        (repo / "convention.md").write_text("```json\n{\"rules\": [\n```\n", encoding="utf-8")
-        assert code() == 0 and "lỗi" in json.loads(hook())["systemMessage"], "convention.md hỏng vẫn không chặn"
-
+    """No local convention_sensor.py; AGENTS describes AAP + commit/push flow."""
+    assert not (ROOT / "dev" / "sensor" / "convention_sensor.py").is_file()
+    agents = (ROOT / "dev" / "AGENTS.md").read_text(encoding="utf-8")
+    assert "xdlc sensor" in agents and "xdlc sensor report" in agents
+    assert "commit" in agents.lower() or "push" in agents.lower()
+    assert "convention.md` local" in agents or "Không đọc `convention.md`" in agents or "không đọc" in agents.lower()
 
 
 def check_kiro():
@@ -89,13 +55,8 @@ def check_kiro():
         assert srv["command"] == "xdlc" and srv["args"] == ["mcp"], role
         head = (d / "POWER.md").read_text(encoding="utf-8").split("---")[1]
         assert f"name: xora-{role}\n" in head and f'mcpServers: ["xora-{role}"]' in head, role
-    hooks = list((ROOT / "dev" / "kiro-hooks").glob("*"))
-    assert [h.name for h in hooks] == ["xora-dev-convention-sensor.json"], hooks  # Kiro CLI V3 chỉ nạp JSON v1
-    spec = json.loads(hooks[0].read_text(encoding="utf-8"))
-    hook = spec["hooks"][0]
-    assert spec["version"] == "v1" and hook["trigger"] == "PostFileSave" and hook["action"]["type"] == "agent", spec
-    assert "`xdlc sensor`" in hook["action"]["prompt"] and "convention.md" in hook["action"]["prompt"]
-    assert re.search(hook["matcher"], "src/A.java") and not re.search(hook["matcher"], "README.md")
+    hooks_dir = ROOT / "dev" / "kiro-hooks"
+    assert not hooks_dir.is_dir() or list(hooks_dir.glob("*.json")) == [], "no Kiro PostFileSave convention hook"
 
 
 def check_xdlc():
@@ -157,7 +118,12 @@ def check_xdlc():
                 msg = json.loads(body); seen["mcp"].append(msg)
                 if "id" not in msg:
                     self.send_response(202); self.end_headers(); return
-                return self._json(200, {"jsonrpc": "2.0", "id": msg["id"], "result": {"content": [{"type": "text", "text": "Việc của bạn: WO-1"}], "isError": False}})
+                text = "Việc của bạn: WO-1"
+                args = ((msg.get("params") or {}).get("arguments") or {})
+                q = (args.get("text") or "")
+                if "coding convention" in q.lower() or "convention" in q.lower() and "Developers must follow" in q:
+                    text = "CONVENTION_NL_BODY"
+                return self._json(200, {"jsonrpc": "2.0", "id": msg["id"], "result": {"content": [{"type": "text", "text": text}], "isError": False}})
             self._json(404, {})
 
     srv = http.server.HTTPServer(("127.0.0.1", 0), Backend)
@@ -198,10 +164,12 @@ def check_xdlc():
         (ws / ".kiro" / "skills" / "deploy-guide").mkdir(parents=True)
         (ws / ".kiro" / "skills" / "deploy-guide" / "SKILL.md").write_text("team", encoding="utf-8")
         assert "global or local" in x("setup", "--agent", "kiro", "--scope", "project", cwd=ws, ok=False)
-        assert "Installed" in x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
+        out = x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
+        assert "Installed" in out and "Warning:" in out and "xora-dev" in out, out
         kiro = ws / ".kiro"
         assert (kiro / "skills" / "implement" / "SKILL.md").is_file() and (kiro / "steering" / "xora-dev.md").is_file()
-        assert (kiro / "hooks" / "xora-dev-convention-sensor.json").is_file()
+        assert (kiro / "steering" / "xora-dlc-mcp-routing.md").is_file()
+        assert not (kiro / "hooks" / "xora-dev-convention-sensor.json").is_file()
         servers = json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         entry = servers["xora-dev"]
         assert servers["postgres"] == {"command": "pg"} and entry["args"][-1] == "mcp"
@@ -213,10 +181,10 @@ def check_xdlc():
         r = subprocess.run([entry["command"], *entry["args"]], env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
                            input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n")
         assert json.loads(r.stdout)["result"]["serverInfo"]["name"] == "xoradlc", r.stdout + r.stderr
-        # xdlc sensor: chạy sensor của plugin (chưa có convention.md: nhắc và không chặn)
+        # xdlc sensor before login: must fail clearly
         r = subprocess.run([sys.executable, str(xdlc), "sensor"], cwd=ws, env=env, capture_output=True, text=True, encoding="utf-8")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert (home / ".xdlc" / "plugin" / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py").is_file()
+        assert r.returncode != 0 and "login" in (r.stdout + r.stderr).lower(), r.stdout + r.stderr
+        assert not (home / ".xdlc" / "plugin" / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py").is_file()
         assert "Reinstalled" in x("setup", "--agent=kiro", "--scope=local", cwd=ws)
         assert "Reinstalled" in x("setup", "-a", "kiro", "-s", "local", cwd=ws)  # tuỳ chọn ngắn
         assert "-a, --agent" in x("setup", "-a", "kiro", "-x", "y", cwd=ws, ok=False)
@@ -277,38 +245,31 @@ def check_xdlc():
         assert resp[3]["result"]["content"][0]["text"] == "Việc của bạn: WO-1", resp[3]
         assert any(m.get("method") == "tools/call" and m["params"]["name"] == "xora_ask" for m in seen["mcp"]), seen
 
-        # pre-push: map work order cho nhánh (xdlc link), push thật lên remote bare, sensor gửi cảnh báo về backend
+        # link + AAP sensor fetch + sensor report (no plugin pre-push)
         bare, pp = Path(tmp) / "pp.git", Path(tmp) / "pp"
         g(Path(tmp), "init", "-q", "--bare", str(bare)); pp.mkdir(); g(pp, "init", "-q", "-b", "main")
         g(pp, "remote", "add", "origin", str(bare))
-        rules = {"version": "1", "rules": [{"id": "LOG-001", "type": "forbid", "files": ["**/*.java"], "severity": "red",
-                                            "pattern": "System\\.out\\.println", "message": "In ra console", "fix": "dùng logger"}]}
-        (pp / "convention.md").write_text("```json\n" + json.dumps(rules) + "\n```\n", encoding="utf-8")
+        (pp / "README.md").write_text("demo\n", encoding="utf-8")
         g(pp, "add", "."); g(pp, "commit", "-qm", "init")
         out = x("setup", "--agent", "kiro", "--scope", "local", cwd=pp)
-        assert "pre-push" in out and "xdlc pre-push" in (pp / ".git" / "hooks" / "pre-push").read_text(encoding="utf-8"), out
+        assert "Installed" in out and not (pp / ".git" / "hooks" / "pre-push").exists(), out
         assert "WO-1 --step impl" in x("link", "-l", cwd=pp) and "no work order mapped" in x("status", cwd=pp)
-        assert "Mapped branch main → WO-1" in x("link", cwd=pp, inp="1\n")  # menu (gõ số khi không có terminal)
-        assert "Mapped branch main → WO-2" in x("link", "WO-2", "-t", "impl", "-b", "main", cwd=pp)  # viết tắt, cho agent
+        assert "Mapped branch main → WO-1" in x("link", cwd=pp, inp="1\n")
+        assert "Mapped branch main → WO-2" in x("link", "WO-2", "-t", "impl", "-b", "main", cwd=pp)
         assert "is not among" in x("link", "WO-9", cwd=pp, ok=False)
         assert "(was: WO-2)" in x("link", "wo-1", cwd=pp) and "WO-1 · Tích hợp eKYC" in x("status", cwd=pp)
         (pp / "A.java").write_text('class A { void a(){ System.out.println("x"); } }\n', encoding="utf-8")
-        g(pp, "add", "."); g(pp, "commit", "-qm", "a")
-        push = lambda *a: subprocess.run(["git", "-C", str(pp), "push", "-q", *a], env=env | {"XDLC_NO_TTY": "1"},
-                                         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
-        r = push("origin", "main")
-        assert r.returncode == 0 and "sent 1 alert(s) to Xora DLC (WO-1" in r.stdout + r.stderr, (r.stdout, r.stderr)
+        sens = x("sensor", cwd=pp)
+        assert "CONVENTION_NL_BODY" in sens and "A.java" in sens, sens
+        payload = json.dumps({"findings": [
+            {"file": "A.java", "line": 1, "rule_code": "LOG-001", "severity": "red", "message": "println"}]})
+        assert "sent 1 alert(s) to Xora DLC (WO-1" in x("sensor", "report", cwd=pp, inp=payload + "\n")
         sent = seen["sensor"][-1]
         assert (sent["work_order_id"], sent["step_id"], sent["commit"]) == ("WO-1", "impl", g(pp, "rev-parse", "HEAD").strip())
         assert [(f["file"], f["line"], f["rule_code"], f["severity"]) for f in sent["findings"]] == [("A.java", 1, "LOG-001", "red")]
-        g(pp, "checkout", "-qb", "feature/x")  # nhánh chưa map, không có terminal: không gửi, vẫn push được
-        (pp / "B.java").write_text('class B { void b(){ System.out.println("y"); } }\n', encoding="utf-8")
-        g(pp, "add", "."); g(pp, "commit", "-qm", "b")
-        n = len(seen["sensor"]); r = push("origin", "feature/x")
-        assert r.returncode == 0 and "has no work order mapped" in r.stdout + r.stderr and len(seen["sensor"]) == n, r.stdout + r.stderr
-        # Kiro Global: hook sensor vào ~/.kiro/hooks; nhắc xdlc link cho pre-push
+        assert sent["session_id"].startswith("agent-push:")
         out = x("setup", "--agent", "kiro", "--scope", "global")
-        assert "xdlc link" in out and (home / ".kiro" / "hooks" / "xora-dev-convention-sensor.json").is_file(), out
+        assert "Installed" in out and not (home / ".kiro" / "hooks" / "xora-dev-convention-sensor.json").is_file(), out
 
         # version, update (từ bản clone), remove, logout, uninstall
         assert f"xdlc {version}" in x("--version") and f"xdlc {version}" in x("-v")
@@ -341,8 +302,9 @@ def check_claude_bundle(home, xdlc):
         assert mcp["args"][-1] == "mcp", mcp
         cmds = [h["command"] for g in json.loads((bundle / "dev" / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"].values()
                 for e in g for h in e["hooks"]]
-        assert any(" _print " in c and "${CLAUDE_PLUGIN_ROOT}/AGENTS.md" in c for c in cmds), cmds
-        assert any(c.endswith(" sensor --hook claude") for c in cmds), cmds
+        assert any(" _print " in c and "${CLAUDE_PLUGIN_ROOT}/AGENTS.md" in c
+                   and "xora-dlc-mcp-routing.md" in c for c in cmds), cmds
+        assert not any("convention_sensor" in c or "sensor --hook" in c for c in cmds), cmds
         assert not any(c.startswith(("cat ", "python3 ")) for c in cmds), cmds
 
 
@@ -394,13 +356,14 @@ def check_menu():
         down, enter = "\x1b[B", "\r"
         for name in ("a", "b"):
             (Path(tmp) / name).mkdir()
-            code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter select", down + enter)], Path(tmp) / name, env)
+            # Tip paints keys with ANSI ("Enter" + dim " select"), so wait on the key token only.
+            code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter", down + enter)], Path(tmp) / name, env)
             plain = strip_ansi(out)
             assert code == 0 and "› Local" in plain and "Installed" in plain, out
             assert (Path(tmp) / name / ".kiro" / "skills" / "implement" / "SKILL.md").is_file()
-        code, out = pty_run([cli, "remove"], [("Enter confirm", "\x1b")], Path(tmp) / "a", env)
+        code, out = pty_run([cli, "remove"], [("confirm", "\x1b")], Path(tmp) / "a", env)
         assert code == 0 and "Cancelled" in strip_ansi(out) and (Path(tmp) / "a" / ".kiro").is_dir(), out
-        code, out = pty_run([cli, "remove"], [("Enter confirm", enter), ("Nothing selected", " " + down + " " + enter),
+        code, out = pty_run([cli, "remove"], [("confirm", enter), ("Nothing selected", " " + down + " " + enter),
                                                ("Continue?", down + enter)], Path(tmp) / "a", env)
         assert code == 0 and strip_ansi(out).count("Removed") == 2, out
         assert not (Path(tmp) / "a" / ".kiro").exists() and not (Path(tmp) / "b" / ".kiro").exists()

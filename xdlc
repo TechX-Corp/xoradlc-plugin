@@ -60,7 +60,7 @@ Usage: xdlc <command> [options]
 Commands:
   setup      Install the xora-dev plugin for Kiro CLI or Claude Code
   remove     Remove one or more setups
-  link       Pick a work order for the current branch (sensor sends alerts on git push)
+  link       Map the current branch to a work order (for agent convention alerts)
   login      Log in to Xora DLC
   logout     Log out of Xora DLC on this machine
   status     Backend, signed-in account and role, and where setup is installed
@@ -83,21 +83,20 @@ For details on one command: xdlc <command> --help
 """
 
 CMD_HELP = {
-    "setup": "xdlc setup [-a, --agent kiro|claude] [-s, --scope global|local]\n\nInstall the xora-dev plugin (skill, steering, sensor, MCP server) for Kiro CLI or Claude Code.\n"
+    "setup": "xdlc setup [-a, --agent kiro|claude] [-s, --scope global|local]\n\nInstall the xora-dev plugin (skill, steering, MCP server) for Kiro CLI or Claude Code.\n"
              "If --agent / --scope are missing, prompts on the terminal. Scope:\n"
              "  global  every repo on this machine\n"
              "  local   current project (cwd); git does not track xdlc files\n"
              "If those files were already tracked by git, asks: untrack, or keep as-is.\n"
              "Local setup can be done for many projects; running setup again in the same place reinstalls.\n"
-             "Local also installs a git pre-push hook (sensor sends alerts to Xora DLC on push). For global, run\n"
-             "xdlc link in each repo that should send alerts.",
+             "Convention checks run in the agent when you ask it to commit/push (xdlc sensor + AAP), not in git pre-push.",
     "remove": "xdlc remove [-a, --agent kiro|claude]\n\nPick setups to remove: ↑/↓ move, Space select, a select all, Enter confirm\n"
               "(no terminal: type 1,3 | 1-2 | all). Only deletes files xdlc installed;\n"
               "asks first if you edited a file. In mcp.json, only removes the xora-dev block.",
     "link": "xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]\n\nMap the repo's current branch (identified by origin URL) to a step you are working on in Xora DLC,\n"
-            "so the pre-push hook sends convention alerts to the right work order. No args: menu of in-progress steps\n"
+            "so agent convention alerts (xdlc sensor report) go to the right work order. No args: menu of in-progress steps\n"
             "(from My Work). WO-…: pick directly (add --step if that WO has multiple steps). --list: print the current map\n"
-            "and available steps. If the repo has no xdlc pre-push hook yet, installs it.",
+            "and available steps.",
     "login": "xdlc login\n\nOpens the browser to the Xora DLC login page (SSO or local account) for the current backend.\n"
              "If the browser is already signed in on the web, that account is used: xdlc prints the account for you to check.",
     "logout": "xdlc logout\n\nDeletes the Xora DLC token for the current backend from this machine.",
@@ -105,7 +104,8 @@ CMD_HELP = {
     "use": "xdlc use [prod|local] [-u, --url URL]\n\nNo args: print current backend. prod = deployed, local = backend on this machine\n"
            "(default http://localhost:8000; --url changes and remembers it). Tokens are separate per backend.\n"
            "After switching, open a new agent session (or reconnect in /mcp).",
-    "update": "xdlc update\n\nDownloads the latest release (git tag vX.Y.Z), replaces xdlc and the plugin, then reinstalls into every setup.",
+    "update": "xdlc update\n\nDownloads the latest release (git tag vX.Y.Z), replaces xdlc and the plugin, then reinstalls into every setup.\n"
+              "If there is no release tag yet, falls back to the tip of main (temporary).",
     "--version": "xdlc --version (or -v)\n\nPrints xdlc version, installed plugin version, and the latest release if available.",
     "uninstall": "xdlc uninstall\n\nRemoves every setup, logs out, deletes ~/.xdlc and the xdlc command itself. Asks for confirmation first.",
 }
@@ -237,6 +237,43 @@ def warn(text):
     return _paint(text, 33)
 
 
+def print_help(text, file=None):
+    """Paint help blocks like other TUI: bold sections, accent names, dim trailing tips."""
+    out = file or sys.stdout
+
+    def put(s=""):
+        print(s, file=out)
+
+    lines = text.rstrip().splitlines()
+    for i, line in enumerate(lines):
+        if not line:
+            put()
+            continue
+        if i == 0 and line.startswith("xdlc "):
+            body = line[5:]
+            for name in ("Xora DLC", "Claude Code", "Kiro CLI", "xora-dev"):
+                body = body.replace(name, em(name))
+            put(f"{bold('xdlc')} {body}")
+            continue
+        if line in ("Commands:", "Options:", "Shortcuts (skip terminal prompts):"):
+            put(bold(line))
+            continue
+        if line.startswith("Usage:"):
+            put(f"{bold('Usage:')}{line[6:]}")
+            continue
+        if line.startswith("Scope:"):
+            put(f"{bold('Scope:')}{dim(line[6:])}")
+            continue
+        if line.startswith("For details"):
+            put(dim(line))
+            continue
+        m = re.match(r"^(  )(\S.*?\S|\S)( {2,})(.+)$", line)
+        if m:
+            put(f"{m.group(1)}{em(m.group(2))}{m.group(3)}{m.group(4)}")
+            continue
+        put(line)
+
+
 def arrow_keys():
     """Arrow-key menus when stdin/stdout are a real terminal; otherwise (pipe, CI, ANSI-unaware console,
     XDLC_PLAIN=1) type numbers."""
@@ -295,14 +332,35 @@ class _Raw:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
 
 
+def _tip_action(key, gloss):
+    """Menu footer: accent the key, dim the gloss (e.g. Enter + select)."""
+    return f"{em(key)}{dim(' ' + gloss)}"
+
+
+def menu_tips(multi=False):
+    sep = dim(" · ")
+    if multi:
+        return sep.join((
+            _tip_action("↑/↓", "move"),
+            _tip_action("Space", "select"),
+            _tip_action("a", "select all"),
+            _tip_action("Enter", "confirm"),
+            _tip_action("Esc", "cancel"),
+        ))
+    return sep.join((
+        _tip_action("↑/↓", "move"),
+        _tip_action("Enter", "select"),
+        _tip_action("Esc", "cancel"),
+    ))
+
+
 def menu(title, labels, multi=False):
     """↑/↓ move, Enter select; multi: Space mark, a = all. Esc / q cancel. → selected indices.
     Single: ◉/○ radio; multi: > focus + □/▣. Focused label is cyan."""
     fd, n = sys.stdin.fileno(), len(labels)
     cols = shutil.get_terminal_size((80, 24)).columns
     width = cols - 1 if cols >= 40 else 10_000  # unknown width: do not truncate lines
-    tips = ("↑/↓ move · Space select · a select all · Enter confirm · Esc cancel" if multi
-            else "↑/↓ move · Enter select · Esc cancel")
+    tips = menu_tips(multi)
     cur, marked, hint, result = 0, set(), None, None
     out = sys.stdout
 
@@ -321,10 +379,7 @@ def menu(title, labels, multi=False):
             if i == cur:
                 line = focus(line)  # radio / arrow+checkbox + label
             out.write("\r\x1b[2K" + line + "\n")
-        tip = hint or tips
-        if len(tip) > width:
-            tip = tip[:width]
-        out.write("\r\x1b[2K" + dim(tip) + "\n")
+        out.write("\r\x1b[2K" + (hint or tips) + "\n")
         out.flush()
 
     print(title)
@@ -348,7 +403,8 @@ def menu(title, labels, multi=False):
                 elif marked:
                     result = sorted(marked)
                 else:
-                    hint = "Nothing selected: Space to select, Esc to cancel"
+                    hint = (dim("Nothing selected: ") + em("Space") + dim(" to select, ")
+                            + em("Esc") + dim(" to cancel"))
             elif k == "esc":
                 raise Abort("Cancelled.", 0)
             if result is None:
@@ -790,6 +846,51 @@ def api(method, path, body=None, timeout=15):
     return status, out
 
 
+CONVENTION_ASK_PROMPT = (
+    "Return the full coding convention that Developers must follow for this organization / "
+    "current work, from the knowledge base. Prefer the official coding convention document. "
+    "Include any automated rule IDs (e.g. SEC-01) if present. Plain text only."
+)
+
+
+def ask_aap(question, timeout=120):
+    """Ask AAP via POST /mcp/user tools/call xora_ask (OAuth). → answer text."""
+    token = access_token()
+    if not token:
+        raise Abort("Not logged in to Xora DLC: run xdlc login.", 2)
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "xora_ask", "arguments": {"text": question[:3800]}}}
+    status, out = request("POST", base_url() + "/mcp/user", body=body, token=token, timeout=timeout)
+    if status == 401 and (token := access_token(force_refresh=True)):
+        status, out = request("POST", base_url() + "/mcp/user", body=body, token=token, timeout=timeout)
+    if status == 0:
+        raise Abort(f"Could not connect to {base_url()} ({out}).", 2)
+    if status != 200 or not isinstance(out, dict):
+        raise Abort(f"AAP ask failed (HTTP {status}): {out}", 2)
+    result = out.get("result") or {}
+    if result.get("isError"):
+        raise Abort((result.get("content") or [{}])[0].get("text") or "AAP error", 2)
+    texts = [c.get("text") for c in (result.get("content") or []) if c.get("type") == "text" and c.get("text")]
+    if not texts:
+        raise Abort("AAP returned no convention text.", 2)
+    return texts[0]
+
+
+def changed_files(root):
+    """Paths (relative) of changed/untracked files in the working tree."""
+    out = git_out(root, "status", "--porcelain") or ""
+    files = []
+    for ln in out.splitlines():
+        if len(ln) < 4:
+            continue
+        path = ln[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if path and path not in files:
+            files.append(path)
+    return files
+
+
 def my_steps():
     """Steps you are working on (My Work: steps_in_progress) on the current backend."""
     status, out = api("GET", "/my-work")
@@ -836,26 +937,8 @@ def pre_push_line():
 
 
 def install_pre_push(root):
-    """xdlc git pre-push hook (rewrite if it is ours). → True when the repo has that hook."""
-    d = hooks_dir(root)
-    if d is None:
-        print("Repo uses core.hooksPath (e.g. husky): xdlc will not install pre-push. Add this line to the repo's "
-              f"pre-push hook:\n  {pre_push_line()}")
-        return False
-    f = d / "pre-push"
-    if f.exists() and not _ours(f):
-        print(f"Repo already has its own pre-push hook ({short(f)}): xdlc will not overwrite. Add this line to that hook:\n"
-              f"  {pre_push_line()}")
-        return False
-    d.mkdir(parents=True, exist_ok=True)
-    with open(f, "w", encoding="utf-8", newline="\n") as out:  # git runs hooks with sh, including on Windows
-        out.write(f"#!/bin/sh\n{PRE_PUSH_MARK}: check conventions, send alerts to Xora DLC. Does not block push.\n"
-                  f"# Remove: xdlc remove / xdlc uninstall\n{pre_push_line()}\nexit 0\n")
-    os.chmod(f, 0o755)
-    reg = load_json(XDLC / "hooks.json", [])
-    if str(f) not in reg:
-        save_json(XDLC / "hooks.json", reg + [str(f)])
-    return True
+    """Convention checks are agent-side; do not install a plugin pre-push hook. → always False."""
+    return False
 
 
 def remove_pre_push(f):
@@ -885,83 +968,8 @@ def _attach_tty():
 
 
 def pre_push(argv):
-    """xdlc sensor --pre-push <remote> <url> (git hook): check files in the upcoming push, send alerts to
-    Xora DLC for the work order mapped to the branch. Alerts only: every error is printed, then push continues."""
-    remote = argv[0] if argv else "origin"
-    refs = [ln.split() for ln in sys.stdin.read().splitlines() if ln.strip()]
-    root = git_root(Path.cwd())
-    sensor = BUNDLE / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py"
-    if not root or not sensor.is_file():
-        err("xdlc pre-push: plugin not on this machine (xdlc setup), skipping.")
-        return
-    repo_id, origin = repo_identity(root)
-    tty = None
-    for parts in refs:
-        if len(parts) != 4 or parts[1] == ZERO or not parts[2].startswith("refs/heads/"):
-            continue  # delete branch, tag
-        local_sha, remote_sha, branch = parts[1], parts[3], parts[2][len("refs/heads/"):]
-        base = remote_sha if remote_sha != ZERO else (
-            git_out(root, "merge-base", local_sha, f"refs/remotes/{remote}/HEAD")
-            or git_out(root, "rev-parse", "--verify", "-q", f"{local_sha}^") or EMPTY_TREE)
-        files = (git_out(root, "diff", "--name-only", "--diff-filter=d", base, local_sha) or "").splitlines()
-        files = [str(root / f) for f in files if (root / f).is_file()]
-        if not files:
-            continue
-        r = subprocess.run([sys.executable, str(sensor), "--json", "--base", base, *files], cwd=root,
-                           capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           env={**os.environ, "PYTHONUTF8": "1"})
-        try:
-            result = json.loads(r.stdout)
-        except ValueError:
-            err(f"xdlc pre-push: sensor error, skipping ({(r.stderr or r.stdout).strip()[:200]})")
-            continue
-        found = result.get("findings") or []
-        if not found:
-            print(f"xdlc: no convention alerts on branch {branch}.")
-            continue  # nothing to send (also do not ask for work order)
-        print(f"xdlc: {len(found)} convention alert(s) on branch {branch} ({len(files)} changed file(s)).")
-        for x in found[:20]:
-            fix = f" → {x['fix']}" if x.get("fix") else ""
-            print(f"  - {x['file']}{':' + str(x['line']) if x.get('line') else ''} [{x['rule_code']}] {x['message']}{fix}")
-        if len(found) > 20:
-            print(f"  … and {len(found) - 20} more alert(s)")
-        step = link_of(repo_id, branch)
-        if not step:
-            if tty is None:
-                tty = _attach_tty()
-            if not tty:
-                print(f"xdlc: branch {branch} has no work order mapped: not sending this time. Run xdlc link in the repo.")
-                continue
-            try:
-                steps = my_steps()
-                if not steps:
-                    print("xdlc: you have no in-progress steps in Xora DLC: not sending.")
-                    continue
-                step = pick_step(branch, steps)
-                save_link(repo_id, branch, step)
-            except Abort as e:
-                print(f"xdlc: {e} Not sending this time.")
-                continue
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        body = {"work_order_id": step["work_order_id"], "step_id": step["step_id"],
-                "machine": (platform.node() or "unknown")[:120], "session_id": f"git-push:{branch}"[:120],
-                "repo": (origin or repo_id)[:300], "commit": local_sha[:64],
-                "findings": [{"file": x["file"][:500], "line": x.get("line"), "rule_code": x["rule_code"][:32],
-                              "severity": x["severity"], "message": x["message"][:300], "at": now}
-                             for x in found[:500]]}
-        status, out = api("POST", "/governance/sensor-events", body)
-        where = f"{step['work_order_id']} · {step.get('step_name') or step['step_id']}"
-        if status is None:
-            print("xdlc: not logged in to Xora DLC (xdlc login): not sending alerts.")
-        elif status == 201:
-            print(f"xdlc: sent {len(body['findings'])} alert(s) to Xora DLC ({where}).")
-        elif status == 403:
-            print(f"xdlc: you are not a Dev on {where}: not sending. Remap with xdlc link.")
-        elif status == 0:
-            print(f"xdlc: could not connect to {base_url()}: not sending ({out}).")
-        else:
-            detail = out.get("error", {}).get("detail") if isinstance(out, dict) else out
-            print(f"xdlc: Xora DLC rejected (HTTP {status}): {detail}")
+    """Legacy git hook entry: plugin no longer scans on push."""
+    print("xdlc: convention checks run in the agent on commit/push, not in git pre-push.")
 
 
 # ── Kiro ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1066,8 +1074,6 @@ def claude_bundle(bundle):
                 c = h.get("command", "")
                 if c.startswith("cat "):
                     h["command"] = f"{xdlc} _print {c[4:]}"
-                elif "/sensor/convention_sensor.py" in c:
-                    h["command"] = f"{xdlc} sensor " + c.split("convention_sensor.py\"", 1)[-1].strip()
     save_json(dev / "hooks" / "hooks.json", hooks)
 
 
@@ -1089,12 +1095,12 @@ def remove_claude(rec, interactive):
     if rec["scope"] == "local" and Path(rec["path"]).is_dir():
         set_exclude(rec["path"], [])
     if not shutil.which("claude"):
-        print("  Command 'claude' not found: skipping uninstall in Claude Code.")
+        print(dim("  Command 'claude' not found: skipping uninstall in Claude Code."))
         return
     r = run(["claude", "plugin", "uninstall", PLUGIN, "--scope", CLAUDE_SCOPE[rec["scope"]]],
             cwd=rec["path"] if Path(rec["path"]).is_dir() else None, check=False)
     if r.returncode != 0:
-        print(f"  claude plugin uninstall: {(r.stderr or r.stdout).strip()}")
+        print(warn("  claude plugin uninstall:") + dim(f" {(r.stderr or r.stdout).strip()}"))
 
 
 SETUP = {"kiro": setup_kiro, "claude": setup_claude}
@@ -1161,19 +1167,18 @@ def cmd_setup(argv):
     items = [r for r in items if not same(r, rec)] + [rec]
     save_installs(items)
     verb = "Reinstalled" if old else "Installed"
+    print()
     print(f"{ok(verb)} {em('xora-dev')} for {em(AGENTS[agent])}: {label(rec).strip()}")
     if any(r["agent"] == agent and r["scope"] == "global" for r in items) and \
             any(r["agent"] == agent and r["scope"] == "local" and r["path"] == str(cwd) for r in items):
         print(warn("Note:") + dim(f" both Global and Local exist for this project; "
                                   f"{em('Local')} is used, Global is redundant here."))
-    root = git_root(path) if scope == "local" else None
-    if root and install_pre_push(root):
-        print(ok("Installed") + dim(f" git pre-push hook: on push, the sensor sends alerts to {em('Xora DLC')} "
-                                    f"(first push per branch asks for a work order)."))
-    elif scope == "global":
-        print(dim(f"To send convention alerts to {em('Xora DLC')} on push: in each repo "
-                  f"(without Local setup) run {em('xdlc link')}."))
+    print(warn("Warning:") + dim(
+        f" setup adds agent instructions that prefer MCP {em('xora-dev')} / {em('xora_ask')} for Xora DLC "
+        f"(shared context, work orders, KB). Other plugins may still win if their routing is stronger "
+        f"or the Developer overrides. Open a new agent session after setup."))
     tip = "open a new Kiro session" if agent == "kiro" else "open a new Claude Code session (accept the xora-dev MCP server if asked)"
+    print()
     print(dim(f"Next: {tip}." + ("" if tokens() else f" Not logged in: run {em('xdlc login')}.")))
 
 
@@ -1200,13 +1205,15 @@ def cmd_remove(argv):
             while (idx := pick_many(len(cands), ask("> "))) is None:
                 print("Enter numbers, a range, or all.")
         chosen = [cands[i] for i in idx]
-        print("Will remove:")
+        print()
+        print(f"{bold('Will remove:')}")
         for r in chosen:
-            what = (f"{len(r.get('files', {}))} file(s) under .kiro/, {SERVER} block in {r['mcp_json']}"
-                    if r["agent"] == "kiro" else f"plugin {SERVER} (scope {CLAUDE_SCOPE[r['scope']]})")
+            what = (f"{len(r.get('files', {}))} file(s) under .kiro/, {em(SERVER)} block in {r['mcp_json']}"
+                    if r["agent"] == "kiro" else f"plugin {em(SERVER)} (scope {em(CLAUDE_SCOPE[r['scope']])})")
             print(f"  - {label(r).strip()}: {what}")
         if not confirm("Continue?"):
             raise Abort("Cancelled.", 0)
+    print()
     for r in chosen:
         REMOVE[r["agent"]](r, True)
         items = [x for x in items if not same(x, r)]
@@ -1426,7 +1433,10 @@ def cmd_status(argv):
     plugin = bundle_version() or dim("not downloaded")
     print(f"{bold('xdlc')} {VERSION} · plugin {plugin}")
     print()
-    print(f"{bold('Backend:')} {em(c['env'])}")
+    if c["env"] == "local":
+        print(f"{bold('Backend:')} {em(c['env'])}  {dim(base_url(c))}")
+    else:
+        print(f"{bold('Backend:')} {em(c['env'])}")
     print()
     u, why = whoami()
     t = tokens(c["env"])
@@ -1440,8 +1450,8 @@ def cmd_status(argv):
         cur = link_of(repo_id, branch) if branch else None
         mapped = step_label(cur) if cur else dim("no work order mapped (xdlc link)")
         print(f"{bold('Current repo:')} {em(repo_id)} · branch {em(branch or '(detached HEAD)')} → {mapped}")
-        hook = ok("installed") if pre_push_of(root) else dim("not installed (xdlc link will install)")
-        print(f"{bold('pre-push hook:')} {hook}")
+        print(dim("Convention alerts: agent runs xdlc sensor / sensor report on commit/push "
+                  f"(map branch with {em('xdlc link')})."))
     print()
     items = installs()
     print(f"{bold('Setups:')}" + ("" if items else dim(" none (run xdlc setup)")))
@@ -1452,9 +1462,16 @@ def cmd_status(argv):
 def cmd_use(argv):
     argv = long_opts(argv)
     c = config()
+
+    def using_line(cfg):
+        if cfg["env"] == "local":
+            return f"{bold('Using:')} {em(cfg['env'])}  {dim(base_url(cfg))}"
+        return f"{bold('Using:')} {em(cfg['env'])}"
+
     if not argv:
-        print(f"Using: {c['env']}  {base_url(c)}")
-        print("Switch: xdlc use prod | xdlc use local [-u, --url URL]")
+        print(using_line(c))
+        print(dim("Switch: ") + em("xdlc use prod") + dim(" | ") + em("xdlc use local")
+              + dim(" [") + em("-u") + dim(", ") + em("--url URL") + dim("]"))
         return
     env, rest = argv[0], argv[1:]
     if env not in ("prod", "local"):
@@ -1466,11 +1483,12 @@ def cmd_use(argv):
     changed = env != c["env"] or bool(rest)
     c["env"] = env
     save_json(XDLC / "config.json", c)
-    print(f"Using: {env}  {base_url(c)}")
+    print(using_line(c))
     if not tokens(env):
-        print("Not logged in to this backend: run xdlc login.")
+        print(dim("Not logged in to this backend: run ") + em("xdlc login") + dim("."))
     if changed:
-        print("Open a new agent session (or reconnect xora-dev in /mcp) so the agent uses the new backend.")
+        print(dim("Open a new agent session (or reconnect ") + em("xora-dev")
+              + dim(" in ") + em("/mcp") + dim(") so the agent uses the new backend."))
 
 
 def reapply(items, interactive):
@@ -1478,16 +1496,14 @@ def reapply(items, interactive):
     done = []
     for r in items:
         if r["scope"] != "global" and not Path(r["path"]).is_dir():
-            print(f"  Skipping {label(r).strip()}: directory no longer exists.")
+            print(dim(f"  Skipping {label(r).strip()}: directory no longer exists."))
             done.append(r)
             continue
         try:
             done.append(SETUP[r["agent"]](bundle, r["scope"], r["path"], r, interactive))
-            if r["scope"] == "local" and (root := git_root(r["path"])) and pre_push_of(root):
-                install_pre_push(root)  # refresh hook command for the new version
-            print(f"  Updated {label(r).strip()}")
+            print(f"  {ok('Updated')} {label(r).strip()}")
         except Abort as e:
-            print(f"  Error updating {label(r).strip()}: {e}")
+            print(f"  {warn('Error')} updating {label(r).strip()}: {e}")
             done.append(r)
     save_installs(done)
 
@@ -1499,9 +1515,11 @@ def cmd_update(argv):
     if not ref and not os.environ.get("XDLC_PLUGIN_DIR"):
         ref = latest_release()
         if not ref:
-            raise Abort("No release yet (tag vX.Y.Z) or could not query GitHub.")
-        if _semver(ref) <= _semver(VERSION) and bundle_version() == VERSION:
-            print(f"Already up to date ({VERSION}).")
+            # Temporary until the first vX.Y.Z release exists: pull tip of main.
+            ref = "main"
+            print(dim("No release tag yet; updating from ") + em("main") + dim("."))
+        elif _semver(ref) <= _semver(VERSION) and bundle_version() == VERSION:
+            print(ok("Already up to date") + dim(f" ({VERSION})."))
             return
     src = fetch_bundle(ref)
     new_cli = src / "xdlc"
@@ -1513,7 +1531,9 @@ def cmd_update(argv):
     os.chmod(tmp, 0o755)
     install_bundle(src)
     os.replace(tmp, target)
-    print(f"Updated xdlc and plugin ({ref or 'local copy'}). Reinstalling into existing setups:")
+    src_label = em(ref) if ref else dim("local copy")
+    print(f"{ok('Updated')} {em('xdlc')} and plugin ({src_label}).")
+    print(dim("Reinstalling into existing setups:"))
     # New binary reinstalls itself so install logic is from the new version.
     if WINDOWS:
         raise Abort("", subprocess.run([sys.executable, str(target), "_reapply"]).returncode)
@@ -1521,13 +1541,18 @@ def cmd_update(argv):
 
 
 def cmd_version(argv):
-    print(f"xdlc {VERSION}")
-    print(f"plugin {bundle_version() or 'not downloaded (run xdlc setup)'}")
-    for r in installs():
-        print(f"  {label(r)}   v{r.get('version') or '?'}")
+    plugin = bundle_version()
+    print(f"{bold('xdlc')} {VERSION}")
+    print(f"{bold('plugin')} {plugin or dim('not downloaded (run xdlc setup)')}")
+    print()
+    items = installs()
+    print(f"{bold('Setups:')}" + ("" if items else dim(" none")))
+    for i, r in enumerate(items, 1):
+        print(f"  {i}. {label(r)}   v{r.get('version') or '?'}")
     latest = latest_release()
     if latest and _semver(latest) > _semver(VERSION):
-        print(f"Newer release {latest}: run xdlc update.")
+        print()
+        print(dim(f"Newer release {em(latest)}: run {em('xdlc update')}."))
 
 
 def _remove_from_user_path(folder):
@@ -1548,19 +1573,22 @@ def cmd_uninstall(argv):
     if argv:
         raise Abort("uninstall takes no options.", 2)
     items = installs()
-    print("Will remove all of Xora DLC from this machine:")
+    print(f"{bold('Will remove')} all of {em('Xora DLC')} from this machine:")
+    print()
     for r in items:
-        print(f"  - setup: {label(r).strip()}")
+        print(f"  - {bold('setup:')} {label(r).strip()}")
     hooks = load_json(XDLC / "hooks.json", [])
     for h in hooks:
-        print(f"  - hook pre-push: {short(h)}")
-    print(f"  - login token, work order maps, config, and plugin bundle: {short(XDLC)}")
-    print(f"  - xdlc command: {short(xdlc_path())}")
+        print(f"  - {bold('hook pre-push:')} {short(h)}")
+    print(f"  - {bold('data:')} login token, work order maps, config, and plugin bundle ({short(XDLC)})")
+    print(f"  - {bold('command:')} {short(xdlc_path())}")
+    print()
     if not confirm("Continue?"):
         raise Abort("Cancelled.", 0)
+    print()
     for r in items:
         REMOVE[r["agent"]](r, True)
-        print(f"Removed {label(r).strip()}")
+        print(f"{ok('Removed')} {label(r).strip()}")
     for h in hooks:
         remove_pre_push(h)
     after_claude_removed([])
@@ -1570,7 +1598,9 @@ def cmd_uninstall(argv):
         if WINDOWS:
             (BIN.parent / "xdlc.cmd").unlink(missing_ok=True)
             _remove_from_user_path(BIN.parent)
-    print("Removed Xora DLC. Reinstall: " + INSTALL_CMD)
+    print()
+    print(f"{ok('Removed')} {em('Xora DLC')}.")
+    print(dim(f"Reinstall: {INSTALL_CMD}"))
 
 
 # ── local MCP server for the agent ─────────────────────────────────────────────────────────────────────
@@ -1650,19 +1680,89 @@ def cmd_mcp(argv):
 
 
 def cmd_sensor(argv):
-    """Plugin convention sensor, same Python as xdlc, UTF-8 (Kiro / Claude hooks, pre-push, manual)."""
+    """Fetch convention NL from AAP, or report structured findings to Governance."""
     if argv[:1] == ["--pre-push"]:
+        pre_push(argv[1:])
+        return
+    if argv[:1] == ["report"]:
+        rest = argv[1:]
+        raw = None
+        if rest[:1] == ["--file"] and len(rest) >= 2:
+            raw = Path(rest[1]).read_text(encoding="utf-8")
+        elif rest:
+            raise Abort("xdlc sensor report [--file PATH]  (JSON findings on stdin if no --file)", 2)
+        else:
+            raw = sys.stdin.read()
         try:
-            pre_push(argv[1:])
-        except Exception as e:  # never block push
-            err(f"xdlc pre-push: error, skipping ({e})")
-        return
-    sensor = BUNDLE / "agents-plugin" / "dev" / "sensor" / "convention_sensor.py"
-    if not sensor.is_file():  # sensor only warns, never blocks: missing plugin still exits 0
-        err("xdlc sensor: plugin not on this machine, skipping (run xdlc setup).")
-        return
-    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
-    raise Abort("", subprocess.run([sys.executable, str(sensor), *argv], env=env).returncode)
+            data = json.loads(raw)
+        except ValueError as e:
+            raise Abort(f"Invalid findings JSON: {e}", 2)
+        found = data.get("findings") if isinstance(data, dict) else None
+        if not isinstance(found, list) or not found:
+            raise Abort("findings must be a non-empty list.", 2)
+        root = git_root(Path.cwd())
+        if not root:
+            raise Abort("Not a git repo: cd into the repo and run again.")
+        branch = git_out(root, "branch", "--show-current") or "(detached)"
+        repo_id, origin = repo_identity(root)
+        step = link_of(repo_id, branch)
+        if not step:
+            raise Abort(f"Branch {branch} has no work order mapped: run xdlc link.", 2)
+        commit = (git_out(root, "rev-parse", "HEAD") or "")[:64]
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        findings = []
+        for x in found[:500]:
+            if not isinstance(x, dict):
+                continue
+            sev = x.get("severity") or "yellow"
+            if sev in ("🔴", "red"):
+                sev = "red"
+            elif sev in ("🟡", "yellow"):
+                sev = "yellow"
+            else:
+                sev = "yellow"
+            findings.append({
+                "file": str(x.get("file") or "")[:500],
+                "line": x.get("line"),
+                "rule_code": str(x.get("rule_code") or "AAP-NL")[:32],
+                "severity": sev,
+                "message": str(x.get("message") or "")[:300],
+                "at": now,
+            })
+        if not findings or not findings[0]["file"]:
+            raise Abort("Each finding needs file, rule_code, severity, message.", 2)
+        body = {"work_order_id": step["work_order_id"], "step_id": step["step_id"],
+                "machine": (platform.node() or "unknown")[:120], "session_id": f"agent-push:{branch}"[:120],
+                "repo": (origin or repo_id)[:300], "commit": commit,
+                "findings": findings}
+        status, out = api("POST", "/governance/sensor-events", body)
+        where = f"{step['work_order_id']} · {step.get('step_name') or step['step_id']}"
+        if status is None:
+            raise Abort("Not logged in to Xora DLC (xdlc login): not sending alerts.", 2)
+        if status == 201:
+            print(f"xdlc: sent {len(body['findings'])} alert(s) to Xora DLC ({where}).")
+            return
+        if status == 403:
+            raise Abort(f"You are not a Dev on {where}: remap with xdlc link.", 2)
+        if status == 0:
+            raise Abort(f"Could not connect to {base_url()}: ({out}).", 2)
+        detail = out.get("error", {}).get("detail") if isinstance(out, dict) else out
+        raise Abort(f"Xora DLC rejected (HTTP {status}): {detail}", 2)
+
+    if argv:
+        raise Abort("xdlc sensor | xdlc sensor report [--file PATH]", 2)
+    root = git_root(Path.cwd()) or Path.cwd()
+    text = ask_aap(CONVENTION_ASK_PROMPT)
+    print("Convention (from AAP / KB):")
+    print(text.rstrip())
+    print()
+    files = changed_files(root) if git_root(Path.cwd()) else []
+    if files:
+        print("Changed files:")
+        for f in files:
+            print(f"  {f}")
+    else:
+        print("Changed files: (none detected)")
 
 
 def cmd_print(argv):
@@ -1698,10 +1798,18 @@ def cmd_link(argv):
     cur = link_of(repo_id, branch)
     steps = my_steps()
     if list_only:
-        print(f"Branch {branch} ({repo_id}): " + (step_label(cur) if cur else "no work order mapped"))
-        print("Your in-progress steps (xdlc link <WO> --step <step>):" if steps else "You have no in-progress steps.")
-        for st in steps:
-            print(f"  {st['work_order_id']} --step {st['step_id']}   {st.get('work_order_name') or ''} · {st.get('step_name') or ''}")
+        mapped = step_label(cur) if cur else dim("no work order mapped")
+        print(f"{bold('Branch')} {em(branch)} ({em(repo_id)}): {mapped}")
+        print()
+        if steps:
+            print(dim("Your in-progress steps (") + em("xdlc link <WO>") + dim(" ")
+                  + em("--step") + dim(" <step>):"))
+            for i, st in enumerate(steps, 1):
+                meta = f"{st.get('work_order_name') or ''} · {st.get('step_name') or ''}".strip(" ·")
+                print(f"  {i}. {em(st['work_order_id'])} {em('--step')} {em(st['step_id'])}"
+                      + (f"   {meta}" if meta else ""))
+        else:
+            print(dim("You have no in-progress steps."))
         return
     if wo:
         cands = [st for st in steps if st["work_order_id"].lower() == wo.lower() and (not step_id or st["step_id"] == step_id)]
@@ -1715,10 +1823,10 @@ def cmd_link(argv):
             raise Abort(f"You have no in-progress steps in Xora DLC ({config()['env']}): nothing to map.")
         chosen = pick_step(branch, steps)
     save_link(repo_id, branch, chosen)
-    print(f"Mapped branch {branch} → {step_label(chosen)}" + (f" (was: {cur['work_order_id']})" if cur and
-          (cur["work_order_id"], cur["step_id"]) != (chosen["work_order_id"], chosen["step_id"]) else ""))
-    if not pre_push_of(root) and install_pre_push(root):
-        print("Installed git pre-push hook for this repo: on push, the sensor sends alerts for the work order above.")
+    was = ""
+    if cur and (cur["work_order_id"], cur["step_id"]) != (chosen["work_order_id"], chosen["step_id"]):
+        was = dim(f" (was: {cur['work_order_id']})")
+    print(f"{ok('Mapped')} branch {em(branch)} → {em(step_label(chosen))}{was}")
 
 
 def cmd_reapply(argv):
@@ -1739,22 +1847,22 @@ def main(argv):
             pass
     if not argv or argv[0] in ("-h", "--help", "help"):
         if len(argv) == 2 and argv[1] in ("-v", "version"):
-            print(CMD_HELP["--version"])
+            print_help(CMD_HELP["--version"])
         elif len(argv) == 2 and argv[1] in CMD_HELP:
-            print(CMD_HELP[argv[1]])
+            print_help(CMD_HELP[argv[1]])
         else:
-            print(HELP.format(v=VERSION).rstrip())
+            print_help(HELP.format(v=VERSION))
         return 0
     if argv[0] in ("-v", "--version"):
         argv = ["version", *argv[1:]]
     cmd, rest = argv[0], argv[1:]
     if cmd in COMMANDS and rest[:1] in (["-h"], ["--help"]):
-        print(CMD_HELP[cmd])
+        print_help(CMD_HELP[cmd])
         return 0
     fn = COMMANDS.get(cmd) or HIDDEN.get(cmd)
     if not fn:
         err(f"xdlc: unknown command '{cmd}'.\n")
-        err(HELP.format(v=VERSION).rstrip())
+        print_help(HELP.format(v=VERSION), file=sys.stderr)
         return 2
     try:
         fn(rest)

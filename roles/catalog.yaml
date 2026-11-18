@@ -1,0 +1,42 @@
+# Role catalog: enable/disable packs + map whoami.role → pack id.
+# Pack content: roles/<id>/AGENTS.md
+roles:
+  - id: dev
+    enabled: true
+    whoami_roles:
+      - DEV
+      - developer
+    path: roles/dev
+
+  - id: ba
+    enabled: false
+    whoami_roles:
+      - BA
+    path: roles/ba
+
+  - id: qa
+    enabled: false
+    whoami_roles:
+      - QA
+    path: roles/qa
+
+  - id: techlead
+    enabled: false
+    whoami_roles:
+      - TECHLEAD
+      - techlead
+    path: roles/techlead
+
+  - id: reviewer
+    enabled: false
+    whoami_roles:
+      - REVIEWER
+      - reviewer
+    path: roles/reviewer
+
+  - id: delivery
+    enabled: false
+    whoami_roles:
+      - DELIVERY
+      - delivery
+    path: roles/delivery

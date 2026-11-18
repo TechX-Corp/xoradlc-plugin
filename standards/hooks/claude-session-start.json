@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "xdlc _print __AGENTS_MD__ __GUIDANCE_MD__"
+          }
+        ]
+      }
+    ]
+  }
+}

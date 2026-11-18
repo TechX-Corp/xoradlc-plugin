@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""xdlc: Xora DLC for Claude Code and Kiro CLI (xora-dev plugin, login, update).
+"""xdlc: Xora DLC for Claude Code and Kiro CLI (xora-dlc pack, login, update).
 
 One file, stdlib only, Python 3.9+. xdlc stores the Xora DLC login token (OAuth, PKCE) in ~/.xdlc and
 runs a local MCP server `xdlc mcp` for the agent: every MCP request is forwarded to the Xora DLC API with the token.
@@ -32,9 +32,7 @@ VERSION = "0.2.1"
 REPO = "TechX-Corp/xoradlc-plugin"
 PROD_URL = "https://xoradlc-platform-api.techxcorp.com"
 CLIENT_ID = "xora-plugin"
-SERVER = "xora-dev"  # MCP server name in the agent
-MARKET = "xora-role-plugins"
-PLUGIN = "xora-dev@" + MARKET
+SERVER = "xora-dlc"  # MCP server name in the agent
 AGENTS = {"kiro": "Kiro CLI", "claude": "Claude Code"}
 SCOPES = ("global", "local")
 SCOPE_NAME = {"global": "Global", "local": "Local"}
@@ -43,7 +41,7 @@ EXCLUDE_END = "# xdlc:end"
 
 HOME = Path.home()
 XDLC = HOME / ".xdlc"
-BUNDLE = XDLC / "plugin"  # local copy of the plugin repo; Claude Code loads the marketplace from here
+BUNDLE = XDLC / "plugin"  # local copy of the plugin pack (roles, host-agents, standards)
 WINDOWS = os.name == "nt"
 if WINDOWS:  # install.ps1: xdlc.py + xdlc.cmd under %LOCALAPPDATA%\Programs\xdlc
     BIN = Path(os.environ.get("XDLC_BIN_DIR") or Path(os.environ.get("LOCALAPPDATA") or HOME) / "Programs" / "xdlc") / "xdlc.py"
@@ -57,7 +55,7 @@ HELP = """xdlc {v}: Xora DLC for Claude Code and Kiro CLI
 Usage: xdlc <command> [options]
 
 Commands:
-  setup      Install the xora-dev plugin for Kiro CLI or Claude Code
+  setup      Install the xora-dlc pack for Kiro CLI or Claude Code
   remove     Remove one or more setups
   link       Map the current branch to a work order (for agent convention alerts)
   login      Log in to Xora DLC
@@ -80,16 +78,10 @@ For details on one command: xdlc <command> --help
 """
 
 CMD_HELP = {
-    "setup": "xdlc setup [-a, --agent kiro|claude] [-s, --scope global|local]\n\nInstall the xora-dev plugin (skill, steering, MCP server) for Kiro CLI or Claude Code.\n"
-             "If --agent / --scope are missing, prompts on the terminal. Scope:\n"
-             "  global  every repo on this machine\n"
-             "  local   current project (cwd); git does not track xdlc files\n"
-             "If those files were already tracked by git, asks: untrack, or keep as-is.\n"
-             "Local setup can be done for many projects; running setup again in the same place reinstalls.\n"
-             "Convention checks run in the agent when you ask it to commit/push (xdlc sensor + AAP), not in git pre-push.",
+    "setup": "xdlc setup [-a, --agent kiro|claude] [-s, --scope global|local]\n\nInstall the xora-dlc pack (AGENTS.md for the logged-in role, standards, MCP, optional AAP skills).\nRequires xdlc login; account role must be enabled in roles/catalog.yaml.\nIf --agent / --scope are missing, prompts on the terminal. Scope:\n  global  every repo on this machine\n  local   current project (cwd); git does not track xdlc files\nConvention checks run in the agent on commit/push (xdlc sensor + AAP), not in git pre-push.",
     "remove": "xdlc remove [-a, --agent kiro|claude]\n\nPick setups to remove: ↑/↓ move, Space select, a select all, Enter confirm\n"
               "(no terminal: type 1,3 | 1-2 | all). Only deletes files xdlc installed;\n"
-              "asks first if you edited a file. In mcp.json, only removes the xora-dev block.",
+              "asks first if you edited a file. In mcp.json, only removes the xora-dlc block.",
     "link": "xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]\n\nMap the repo's current branch (identified by origin URL) to a step you are working on in Xora DLC,\n"
             "so agent convention alerts (xdlc sensor report) go to the right work order. No args: menu of in-progress steps\n"
             "(from My Work). WO-…: pick directly (add --step if that WO has multiple steps). --list: print the current map\n"
@@ -278,7 +270,7 @@ def print_help(text, file=None):
             continue
         if i == 0 and line.startswith("xdlc "):
             body = line[5:]
-            for name in ("Xora DLC", "Claude Code", "Kiro CLI", "xora-dev"):
+            for name in ("Xora DLC", "Claude Code", "Kiro CLI", "xora-dlc"):
                 body = body.replace(name, em(name))
             put(f"{bold('xdlc')} {body}")
             continue
@@ -691,8 +683,8 @@ def fetch_bundle(ref=None):
 
 def install_bundle(src):
     """Replace ~/.xdlc/plugin with src (atomic rename, keep old until done)."""
-    if not (src / "agents-plugin" / "dev").is_dir():
-        raise Abort(f"agents-plugin/dev not found in {src}")
+    if not (src / "roles").is_dir():
+        raise Abort(f"roles/ not found in plugin package {src}")
     XDLC.mkdir(parents=True, exist_ok=True)
     new, old = XDLC / "plugin.new", XDLC / "plugin.old"
     for p in (new, old):
@@ -706,14 +698,13 @@ def install_bundle(src):
 
 
 def ensure_bundle():
-    if not (BUNDLE / "agents-plugin" / "dev").is_dir() or os.environ.get("XDLC_PLUGIN_DIR"):
+    if not (BUNDLE / "roles").is_dir() or os.environ.get("XDLC_PLUGIN_DIR"):
         install_bundle(fetch_bundle())
-    return BUNDLE / "agents-plugin"
+    return BUNDLE
 
 
 def bundle_version():
-    m = load_json(BUNDLE / "agents-plugin" / ".claude-plugin" / "marketplace.json", {})
-    return next((p.get("version") for p in m.get("plugins", []) if p.get("name") == SERVER), None)
+    return VERSION if (BUNDLE / "roles").is_dir() else None
 
 
 def mcp_entry():
@@ -1000,20 +991,420 @@ def pre_push(argv):
     print("xdlc: convention checks run in the agent on commit/push, not in git pre-push.")
 
 
-# ── Kiro ────────────────────────────────────────────────────────────────────────────────────────────────
+# ── pack layout: roles / host-agents / standards ───────────────────────────────────────────────────────
 
-MCP_REL = ".kiro/settings/mcp.json"
+SKILL_ALLOWLIST_PROMPT = (
+    "Return ONLY a JSON array of skills allowed for my Xora DLC role. "
+    'Each element must be {"name":"<skill-id>","description":"<one-line description>"}. '
+    "No markdown fences, no commentary — JSON array only."
+)
 
 
-def kiro_files(src, scope):
-    """(source, dest relative to root): skill, steering, hook JSON v1 (Kiro CLI V3 loads both workspace .kiro/hooks
-    and ~/.kiro/hooks)."""
-    out = [(f, Path(".kiro/skills") / f.relative_to(src / "skills"))
-           for f in sorted((src / "skills").rglob("*")) if f.is_file()]
-    out.append((src / "AGENTS.md", Path(".kiro/steering/xora-dev.md")))
-    out += [(f, Path(".kiro/steering") / f.name) for f in sorted((src / "steering").glob("*.md"))]
-    out += [(f, Path(".kiro/hooks") / f.name) for f in sorted((src / "kiro-hooks").glob("*.json"))]
+def _parse_simple_yaml(text):
+    """Minimal YAML subset (maps/lists/scalars) for catalog.yaml + manifest.yaml. Stdlib only."""
+    def parse_scalar(s):
+        s = s.strip()
+        if s in ("true", "True"):
+            return True
+        if s in ("false", "False"):
+            return False
+        if s in ("null", "Null", "~", ""):
+            return None
+        if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+            return s[1:-1]
+        try:
+            return int(s)
+        except ValueError:
+            return s
+
+    lines = []
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        lines.append(raw.rstrip())
+
+    def indent_of(line):
+        return len(line) - len(line.lstrip(" "))
+
+    def parse_block(idx, min_indent):
+        # Decide list vs map from first item at this level
+        while idx < len(lines) and indent_of(lines[idx]) < min_indent:
+            return None, idx
+        if idx >= len(lines):
+            return None, idx
+        if lines[idx].lstrip().startswith("- "):
+            return parse_list(idx, min_indent)
+        return parse_map(idx, min_indent)
+
+    def parse_map(idx, min_indent):
+        out = {}
+        while idx < len(lines):
+            line = lines[idx]
+            ind = indent_of(line)
+            if ind < min_indent:
+                break
+            if ind > min_indent:
+                raise Abort(f"Invalid YAML indent: {line.strip()}")
+            body = line.strip()
+            if body.startswith("- "):
+                break
+            if ":" not in body:
+                raise Abort(f"Invalid YAML line: {body}")
+            key, _, rest = body.partition(":")
+            key, rest = key.strip(), rest.strip()
+            idx += 1
+            if rest:
+                out[key] = parse_scalar(rest)
+                continue
+            if idx < len(lines) and indent_of(lines[idx]) > ind:
+                child, idx = parse_block(idx, ind + 2)
+                out[key] = child
+            else:
+                out[key] = None
+        return out, idx
+
+    def parse_list(idx, min_indent):
+        out = []
+        while idx < len(lines):
+            line = lines[idx]
+            ind = indent_of(line)
+            if ind < min_indent:
+                break
+            if ind > min_indent:
+                raise Abort(f"Invalid YAML indent: {line.strip()}")
+            body = line.strip()
+            if not body.startswith("- "):
+                break
+            item = body[2:].strip()
+            idx += 1
+            if item and ":" in item and not item.startswith(("http://", "https://")):
+                # inline map start "- id: dev"
+                key, _, rest = item.partition(":")
+                obj = {key.strip(): parse_scalar(rest)}
+                if idx < len(lines) and indent_of(lines[idx]) > ind:
+                    nested, idx = parse_map(idx, ind + 2)
+                    if isinstance(nested, dict):
+                        obj.update(nested)
+                out.append(obj)
+            elif item:
+                out.append(parse_scalar(item))
+            else:
+                child, idx = parse_block(idx, ind + 2)
+                out.append(child)
+        return out, idx
+
+    data, idx = parse_block(0, 0)
+    if idx != len(lines):
+        # allow trailing sibling maps at root by merging
+        while idx < len(lines):
+            more, idx = parse_map(idx, 0)
+            if isinstance(data, dict) and isinstance(more, dict):
+                data.update(more)
+            else:
+                break
+    return data
+
+
+def load_yaml(path):
+    return _parse_simple_yaml(Path(path).read_text(encoding="utf-8"))
+
+
+def pack_root(bundle=None):
+    """Plugin pack root (roles, host-agents, standards)."""
+    return Path(bundle) if bundle else ensure_bundle()
+
+
+def host_manifest(agent, bundle=None):
+    path = pack_root(bundle) / "host-agents" / agent / "manifest.yaml"
+    if not path.is_file():
+        raise Abort(f"Missing host manifest: {path}")
+    return load_yaml(path)
+
+
+def catalog_roles(bundle=None):
+    path = pack_root(bundle) / "roles" / "catalog.yaml"
+    if not path.is_file():
+        raise Abort(f"Missing roles/catalog.yaml at {path}")
+    data = load_yaml(path)
+    return list(data.get("roles") or [])
+
+
+def resolve_role_pack(bundle=None):
+    """→ (role_id, agents_md Path) for the logged-in account. Abort with detail if not allowed."""
+    u, why = whoami()
+    if not u:
+        raise Abort(f"Setup requires login: {why}. Run {em('xdlc login')} first.", 2)
+    raw = (u.get("role") or "").strip()
+    if not raw:
+        raise Abort(
+            f"Account {account_line(u)} has no role. Ask a Xora DLC admin to assign a role "
+            f"(e.g. DEV), then run setup again.", 2)
+    roles = catalog_roles(bundle)
+    key = raw.lower()
+    for r in roles:
+        if not r.get("enabled"):
+            continue
+        aliases = [str(x).lower() for x in (r.get("whoami_roles") or [])] + [str(r.get("id", "")).lower()]
+        if key in aliases:
+            rid = r["id"]
+            rel = r.get("path") or f"roles/{rid}"
+            agents = pack_root(bundle) / rel / "AGENTS.md"
+            if not agents.is_file():
+                raise Abort(f"Role '{rid}' is enabled but {agents} is missing (catalog path: {rel}).", 2)
+            return rid, agents
+    enabled_ids = [r.get("id") for r in roles if r.get("enabled")]
+    raise Abort(
+        f"Account role {em(raw)} is not enabled in this plugin.\n"
+        f"  Enabled role ids: {', '.join(enabled_ids) or '(none)'}\n"
+        f"  Edit roles/catalog.yaml (whoami_roles) or use an account with an enabled role.",
+        2,
+    )
+
+
+def write_mcp_config(config_path, entry):
+    cfg = load_json(config_path, {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg.setdefault("mcpServers", {})[SERVER] = {**entry, "disabled": False, "autoApprove": []}
+    save_json(config_path, cfg)
+
+
+def strip_mcp_config(config_path, created):
+    cfg = load_json(config_path, None)
+    if not isinstance(cfg, dict):
+        return
+    cfg.get("mcpServers", {}).pop(SERVER, None)
+    if created and not cfg.get("mcpServers") and set(cfg) <= {"mcpServers"}:
+        Path(config_path).unlink(missing_ok=True)
+    else:
+        save_json(config_path, cfg)
+
+
+def skill_md(name, description):
+    desc = (description or name).replace("\n", " ").strip()
+    return (
+        f"---\nname: {name}\ndescription: {desc}\n---\n\n"
+        f"# {name}\n\n"
+        f"When the user invokes this skill, call MCP tool `xora_ask` with a clear request to run "
+        f"or fulfill skill `{name}` (include the skill name and the user's intent). "
+        f"Let AAP decide how to execute.\n"
+    )
+
+
+def parse_skill_allowlist(text):
+    """Parse AAP NL → [{name, description}]. Raises ValueError on failure."""
+    s = (text or "").strip()
+    if "```" in s:
+        parts = s.split("```")
+        for i, block in enumerate(parts):
+            if i % 2 == 1:
+                body = block.strip()
+                if body.lower().startswith("json"):
+                    body = body[4:].lstrip()
+                s = body
+                break
+    start, end = s.find("["), s.rfind("]")
+    if start < 0 or end <= start:
+        raise ValueError("no JSON array")
+    data = json.loads(s[start:end + 1])
+    if not isinstance(data, list):
+        raise ValueError("not a list")
+    out = []
+    for item in data:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        out.append({"name": str(item["name"]).strip(), "description": str(item.get("description") or item["name"]).strip()})
+    if not out:
+        raise ValueError("empty skill list")
     return out
+
+
+def fetch_skill_allowlist():
+    """→ list[{name,description}] or [] on failure (fallback: no skills)."""
+    try:
+        text = ask_aap(SKILL_ALLOWLIST_PROMPT, timeout=90)
+        return parse_skill_allowlist(text)
+    except Exception as e:
+        print(warn("Skill allowlist:") + dim(f" could not load from AAP ({e}); continuing without SKILL.md files."))
+        return []
+
+
+def install_skills(skills_dir, skills):
+    """Write hydrated SKILL.md files; → {rel_posix: sha256}."""
+    files = {}
+    skills_dir = Path(skills_dir)
+    for sk in skills:
+        name = sk["name"]
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-") or "skill"
+        rel = Path(skills_dir.name) / safe / "SKILL.md" if False else None
+        dst = skills_dir / safe / "SKILL.md"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(skill_md(name, sk["description"]), encoding="utf-8")
+        # track path relative to install root later
+        files[str(dst)] = sha256(dst)
+    return files
+
+
+def copy_tracked(src, dst):
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst)
+    return sha256(dst)
+
+
+
+def install_standards(man, bundle, base, files):
+    """Copy standards entries {source, dest} from pack standards/ → install root. Mutates files."""
+    std_src = pack_root(bundle) / "standards"
+    for item in man.get("standards") or []:
+        src_name, dest = item.get("source"), item.get("dest")
+        if not src_name or not dest:
+            continue
+        src = std_src / src_name
+        if src.is_file():
+            files[dest] = copy_tracked(src, base / dest)
+    return files
+
+def merge_claude_hooks(settings_path, agents_md, guidance_md):
+    """Merge SessionStart hook that prints AGENTS + GUIDANCE (placeholders filled)."""
+    pack = pack_root()
+    tmpl = pack / "standards" / "hooks" / "claude-session-start.json"
+    hook_doc = json.loads(tmpl.read_text(encoding="utf-8")) if tmpl.is_file() else {"hooks": {}}
+    cmd = shell_cmd(xdlc_argv() + ["_print", str(agents_md), str(guidance_md)])
+    for groups in (hook_doc.get("hooks") or {}).values():
+        for g in groups:
+            for h in g.get("hooks", []):
+                if "command" in h:
+                    h["command"] = cmd
+    settings = load_json(settings_path, {})
+    if not isinstance(settings, dict):
+        settings = {}
+    # replace our SessionStart group; keep other hooks keys
+    hooks = settings.setdefault("hooks", {})
+    hooks["SessionStart"] = (hook_doc.get("hooks") or {}).get("SessionStart") or []
+    save_json(settings_path, settings)
+
+
+def setup_kiro(bundle, scope, path, old, interactive, role_id, agents_src, skills):
+    man = host_manifest("kiro", bundle)
+    base = Path(path)
+    mcp_rel = man["mcp"]["config_path"]
+    agents_rel = man["artifacts"]["agents_md"]
+    skills_rel = man["artifacts"]["skills_dir"]
+    plan_rels = [agents_rel, mcp_rel] + [it["dest"] for it in (man.get("standards") or []) if it.get("dest")]
+    git_choice = local_git(base, plan_rels, old, interactive) if scope == "local" else None
+    files = {}
+    files[agents_rel] = copy_tracked(agents_src, base / agents_rel)
+    install_standards(man, bundle, base, files)
+    # skills under skills_dir/<name>/SKILL.md
+    skill_files = {}
+    skills_root = base / skills_rel
+    for sk in skills:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", sk["name"]).strip("-") or "skill"
+        rel = f"{skills_rel}/{safe}/SKILL.md"
+        dst = base / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(skill_md(sk["name"], sk["description"]), encoding="utf-8")
+        files[rel] = sha256(dst)
+        skill_files[rel] = files[rel]
+    for rel, digest in (old or {}).get("files", {}).items():
+        if rel not in files:
+            remove_file(base, rel, digest, interactive)
+    mcp_file = base / mcp_rel
+    created = (old or {}).get("created_mcp_json", not mcp_file.exists())
+    write_mcp_config(mcp_file, mcp_entry())
+    rec = {"agent": "kiro", "scope": scope, "path": str(base), "version": VERSION, "role": role_id,
+           "files": files, "mcp_json": mcp_rel, "created_mcp_json": created, "git_tracked": git_choice}
+    if scope == "local":
+        excluded = [r for r in files if git_choice != "keep" or r not in git_tracked(base, [r])]
+        if created or git_choice == "untrack":
+            excluded.append(mcp_rel)
+        set_exclude(base, excluded)
+    return rec
+
+
+def remove_kiro(rec, interactive):
+    base = Path(rec["path"])
+    for rel, digest in rec.get("files", {}).items():
+        remove_file(base, rel, digest, interactive)
+    mcp_rel = rec.get("mcp_json") or ".kiro/settings/mcp.json"
+    strip_mcp_config(base / mcp_rel, rec.get("created_mcp_json"))
+    if rec["scope"] == "local":
+        set_exclude(base, [])
+    kiro = base / ".kiro"
+    if kiro.is_dir() and base != HOME:
+        for d in sorted((p for p in kiro.rglob("*") if p.is_dir()), reverse=True):
+            if not any(d.iterdir()):
+                d.rmdir()
+        if kiro.is_dir() and not any(kiro.iterdir()):
+            kiro.rmdir()
+
+
+def setup_claude(bundle, scope, path, old, interactive, role_id, agents_src, skills):
+    if not shutil.which("claude"):
+        raise Abort("Command 'claude' not found. Install Claude Code first: https://code.claude.com")
+    man = host_manifest("claude", bundle)
+    base = Path(path) if scope == "local" else HOME
+    art = man["artifacts"]
+    mcp_rel = man["mcp"]["config_path_local"] if scope == "local" else man["mcp"]["config_path_global"]
+    if scope == "global":
+        mcp_path = HOME / mcp_rel.lstrip("./")
+        # ~/.claude.json lives in home
+        if mcp_rel == ".claude.json":
+            mcp_path = HOME / ".claude.json"
+    else:
+        mcp_path = base / mcp_rel
+    agents_rel = art["agents_md"]
+    skills_rel = art["skills_dir"]
+    settings_rel = art["settings_local"] if scope == "local" else art["settings_global"]
+    git_choice = local_git(base, [settings_rel, mcp_rel, agents_rel], old, interactive) if scope == "local" else None
+    files = {}
+    agents_dst = base / agents_rel
+    files[agents_rel] = copy_tracked(agents_src, agents_dst)
+    install_standards(man, bundle, base, files)
+    for sk in skills:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", sk["name"]).strip("-") or "skill"
+        rel = f"{skills_rel}/{safe}/SKILL.md"
+        dst = base / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(skill_md(sk["name"], sk["description"]), encoding="utf-8")
+        files[rel] = sha256(dst)
+    guidance_rel = next((it["dest"] for it in (man.get("standards") or []) if it.get("source") == "GUIDANCE.md"), None)
+    guidance_path = base / guidance_rel if guidance_rel else agents_dst
+    settings_path = base / settings_rel
+    merge_claude_hooks(settings_path, agents_dst, guidance_path if Path(guidance_path).is_file() else agents_dst)
+    files[settings_rel] = sha256(settings_path)
+    created = (old or {}).get("created_mcp_json", not mcp_path.exists())
+    write_mcp_config(mcp_path, mcp_entry())
+    # track mcp path relative when under base
+    try:
+        mcp_track = str(mcp_path.relative_to(base))
+    except ValueError:
+        mcp_track = str(mcp_path)
+    files[mcp_track] = sha256(mcp_path)
+    for rel, digest in (old or {}).get("files", {}).items():
+        if rel not in files:
+            remove_file(base, rel, digest, interactive)
+    if scope == "local" and git_choice != "keep":
+        set_exclude(base, [settings_rel, mcp_rel])
+    return {"agent": "claude", "scope": scope, "path": str(base), "version": VERSION, "role": role_id,
+            "files": files, "mcp_json": mcp_track, "created_mcp_json": created, "git_tracked": git_choice,
+            "settings_rel": settings_rel}
+
+
+def remove_claude(rec, interactive):
+    base = Path(rec["path"])
+    for rel, digest in rec.get("files", {}).items():
+        p = Path(rel) if Path(rel).is_absolute() else base / rel
+        if p.is_file():
+            if sha256(p) != digest and not (interactive and confirm(f"  {short(p)} was modified after install. Delete anyway?")):
+                print(f"  Keeping {short(p)} (modified).")
+                continue
+            p.unlink(missing_ok=True)
+    strip_mcp_config(base / rec["mcp_json"] if not Path(rec["mcp_json"]).is_absolute() else Path(rec["mcp_json"]),
+                     rec.get("created_mcp_json"))
+    if rec["scope"] == "local":
+        set_exclude(base, [])
 
 
 def remove_file(base, rel, digest, interactive):
@@ -1025,110 +1416,9 @@ def remove_file(base, rel, digest, interactive):
         return
     p.unlink()
     d = p.parent
-    while d != base and d.name != ".kiro" and d.is_dir() and not any(d.iterdir()):
+    while d != base and d.name not in (".kiro", ".claude") and d.is_dir() and not any(d.iterdir()):
         d.rmdir()
         d = d.parent
-
-
-def setup_kiro(bundle, scope, path, old, interactive):
-    src, base = bundle / "dev", Path(path)
-    mcp_file = base / MCP_REL
-    plan = kiro_files(src, scope)
-    git_choice = local_git(base, [r.as_posix() for _, r in plan] + [MCP_REL], old, interactive) if scope == "local" else None
-    files = {}
-    for f, rel in plan:
-        dst = base / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(f, dst)
-        files[rel.as_posix()] = sha256(dst)
-    for rel, digest in (old or {}).get("files", {}).items():  # files from the old version no longer in the new one
-        if rel not in files:
-            remove_file(base, rel, digest, interactive)
-    created = (old or {}).get("created_mcp_json", not mcp_file.exists())
-    cfg = load_json(mcp_file, {})
-    cfg.setdefault("mcpServers", {})[SERVER] = {**mcp_entry(), "disabled": False, "autoApprove": []}
-    save_json(mcp_file, cfg)
-    rec = {"agent": "kiro", "scope": scope, "path": str(base), "version": VERSION,
-           "files": files, "mcp_json": MCP_REL, "created_mcp_json": created, "git_tracked": git_choice}
-    if scope == "local":
-        excluded = [r for r in files if git_choice != "keep" or r not in git_tracked(base, [r])]
-        if created or git_choice == "untrack":
-            excluded.append(MCP_REL)
-        set_exclude(base, excluded)
-    return rec
-
-
-def remove_kiro(rec, interactive):
-    base = Path(rec["path"])
-    for rel, digest in rec.get("files", {}).items():
-        remove_file(base, rel, digest, interactive)
-    mcp_file = base / rec["mcp_json"]
-    cfg = load_json(mcp_file, None)
-    if isinstance(cfg, dict):
-        cfg.get("mcpServers", {}).pop(SERVER, None)
-        if rec.get("created_mcp_json") and not cfg.get("mcpServers") and set(cfg) <= {"mcpServers"}:
-            mcp_file.unlink()
-            for d in (mcp_file.parent, mcp_file.parent.parent):
-                if d.is_dir() and d.name != ".kiro" and not any(d.iterdir()):
-                    d.rmdir()
-        else:
-            save_json(mcp_file, cfg)
-    if rec["scope"] == "local":
-        set_exclude(base, [])
-    kiro = base / ".kiro"
-    if kiro.is_dir() and not any(kiro.iterdir()) and base != HOME:
-        kiro.rmdir()
-
-
-# ── Claude Code ─────────────────────────────────────────────────────────────────────────────────────────
-
-CLAUDE_LOCAL = ".claude/settings.local.json"
-
-
-def need_claude():
-    if not shutil.which("claude"):
-        raise Abort("Command 'claude' not found. Install Claude Code first: https://code.claude.com")
-
-
-def claude_bundle(bundle):
-    """Plugin copy under ~/.xdlc for Claude Code: MCP server and hooks all call xdlc (no cat / python3 needed)."""
-    dev = bundle / "dev"
-    save_json(dev / ".mcp.json", {"mcpServers": {SERVER: mcp_entry()}})
-    xdlc = shell_cmd(xdlc_argv())
-    hooks = load_json(dev / "hooks" / "hooks.json", {})
-    for groups in hooks.get("hooks", {}).values():
-        for g in groups:
-            for h in g.get("hooks", []):
-                c = h.get("command", "")
-                if c.startswith("cat "):
-                    h["command"] = f"{xdlc} _print {c[4:]}"
-    save_json(dev / "hooks" / "hooks.json", hooks)
-
-
-def setup_claude(bundle, scope, path, old, interactive):
-    need_claude()
-    git_choice = local_git(path, [CLAUDE_LOCAL], old, interactive) if scope == "local" else None
-    claude_bundle(bundle)
-    if run(["claude", "plugin", "marketplace", "add", str(bundle)], check=False).returncode != 0:
-        run(["claude", "plugin", "marketplace", "update", MARKET])
-    r = run(["claude", "plugin", "install", PLUGIN, "--scope", CLAUDE_SCOPE[scope]], cwd=path, check=False)
-    if r.returncode != 0 and "already installed" not in (r.stdout + r.stderr):
-        raise Abort(f"claude plugin install failed:\n{(r.stderr or r.stdout).strip()}")
-    if scope == "local" and git_choice != "keep":
-        set_exclude(path, [CLAUDE_LOCAL])
-    return {"agent": "claude", "scope": scope, "path": str(path), "version": VERSION, "git_tracked": git_choice}
-
-
-def remove_claude(rec, interactive):
-    if rec["scope"] == "local" and Path(rec["path"]).is_dir():
-        set_exclude(rec["path"], [])
-    if not shutil.which("claude"):
-        print(dim("  Command 'claude' not found: skipping uninstall in Claude Code."))
-        return
-    r = run(["claude", "plugin", "uninstall", PLUGIN, "--scope", CLAUDE_SCOPE[rec["scope"]]],
-            cwd=rec["path"] if Path(rec["path"]).is_dir() else None, check=False)
-    if r.returncode != 0:
-        print(warn("  claude plugin uninstall:") + dim(f" {(r.stderr or r.stdout).strip()}"))
 
 
 SETUP = {"kiro": setup_kiro, "claude": setup_claude}
@@ -1136,8 +1426,7 @@ REMOVE = {"kiro": remove_kiro, "claude": remove_claude}
 
 
 def after_claude_removed(items):
-    if not any(r["agent"] == "claude" for r in items) and shutil.which("claude"):
-        run(["claude", "plugin", "marketplace", "remove", MARKET], check=False)
+    return  # marketplace removed; nothing to clean globally
 
 
 # ── commands ────────────────────────────────────────────────────────────────────────────────────────────
@@ -1173,9 +1462,9 @@ def options(argv, allowed):
 def cmd_setup(argv):
     opt = options(argv, ("agent", "scope"))
     agent = opt.get("agent") or choose("Install for which agent?", [(k, v) for k, v in AGENTS.items()])
-    if agent == "claude":
-        need_claude()
-    elif not shutil.which("kiro-cli"):
+    if agent == "claude" and not shutil.which("claude"):
+        raise Abort("Command 'claude' not found. Install Claude Code first: https://code.claude.com")
+    elif agent == "kiro" and not shutil.which("kiro-cli"):
         print(warn("Note:") + dim(f" command 'kiro-cli' not found on this machine; installing anyway — "
                                    f"{em('Kiro')} will use it once {em('Kiro CLI')} is installed."))
     cwd = Path.cwd()
@@ -1191,23 +1480,27 @@ def cmd_setup(argv):
     items = installs()
     old = next((r for r in items if same(r, rec_new)), None)
     bundle = ensure_bundle()
-    rec = SETUP[agent](bundle, scope, path, old, True)
+    role_id, agents_src = resolve_role_pack(bundle)
+    print(dim(f"Role pack: {em(role_id)} (from logged-in account)."))
+    skills = fetch_skill_allowlist()
+    if skills:
+        print(dim(f"Hydrating {len(skills)} skill(s) from AAP allowlist."))
+    rec = SETUP[agent](bundle, scope, path, old, True, role_id, agents_src, skills)
     items = [r for r in items if not same(r, rec)] + [rec]
     save_installs(items)
     verb = "Reinstalled" if old else "Installed"
     print()
-    print(f"{ok(verb)} {em('xora-dev')} for {em(AGENTS[agent])}: {label(rec).strip()}")
-    if any(r["agent"] == agent and r["scope"] == "global" for r in items) and \
-            any(r["agent"] == agent and r["scope"] == "local" and r["path"] == str(cwd) for r in items):
+    print(f"{ok(verb)} {em('xora-dlc')} for {em(AGENTS[agent])}: {label(rec).strip()} · role {em(role_id)}")
+    if any(r["agent"] == agent and r["scope"] == "global" for r in items) and             any(r["agent"] == agent and r["scope"] == "local" and r["path"] == str(cwd) for r in items):
         print(warn("Note:") + dim(f" both Global and Local exist for this project; "
                                   f"{em('Local')} is used, Global is redundant here."))
     print(warn("Warning:") + dim(
-        f" setup adds agent instructions that prefer MCP {em('xora-dev')} / {em('xora_ask')} for Xora DLC "
+        f" setup adds agent instructions that prefer MCP {em('xora-dlc')} / {em('xora_ask')} for Xora DLC "
         f"(shared context, work orders, KB). Other plugins may still win if their routing is stronger "
-        f"or the Developer overrides. Open a new agent session after setup."))
-    tip = "open a new Kiro session" if agent == "kiro" else "open a new Claude Code session (accept the xora-dev MCP server if asked)"
+        f"or the user overrides. Open a new agent session after setup."))
+    tip = "open a new Kiro session" if agent == "kiro" else "open a new Claude Code session (accept the xora-dlc MCP server if asked)"
     print()
-    print(dim(f"Next: {tip}." + ("" if tokens() else f" Not logged in: run {em('xdlc login')}.")))
+    print(dim(f"Next: {tip}."))
 
 
 def cmd_remove(argv):
@@ -1215,7 +1508,7 @@ def cmd_remove(argv):
     items = installs()
     cands = [r for r in items if not agent or r["agent"] == agent]
     if not cands:
-        raise Abort(f"No {AGENTS[agent] if agent else 'xora-dev'} setup found.", 0)
+        raise Abort(f"No {AGENTS[agent] if agent else 'xora-dlc'} setup found.", 0)
     cwd = str(Path.cwd())
     if len(cands) == 1:
         chosen = cands
@@ -1237,7 +1530,7 @@ def cmd_remove(argv):
         print(f"{bold('Will remove:')}")
         for r in chosen:
             what = (f"{len(r.get('files', {}))} file(s) under .kiro/, {em(SERVER)} block in {r['mcp_json']}"
-                    if r["agent"] == "kiro" else f"plugin {em(SERVER)} (scope {em(CLAUDE_SCOPE[r['scope']])})")
+                    if r["agent"] == "kiro" else f"MCP {em(SERVER)} + .claude/ files")
             print(f"  - {label(r).strip()}: {what}")
         if not confirm("Continue?"):
             raise Abort("Cancelled.", 0)
@@ -1486,7 +1779,7 @@ def cmd_status(argv):
 
 
 def reapply(items, interactive):
-    bundle = BUNDLE / "agents-plugin"
+    bundle = BUNDLE
     done = []
     for r in items:
         if r["scope"] != "global" and not Path(r["path"]).is_dir():
@@ -1494,7 +1787,11 @@ def reapply(items, interactive):
             done.append(r)
             continue
         try:
-            done.append(SETUP[r["agent"]](bundle, r["scope"], r["path"], r, interactive))
+            role_id = r.get("role") or "dev"
+            agents_src = pack_root(bundle) / "roles" / role_id / "AGENTS.md"
+            if not agents_src.is_file():
+                agents_src = pack_root(bundle) / "roles" / "dev" / "AGENTS.md"
+            done.append(SETUP[r["agent"]](bundle, r["scope"], r["path"], r, interactive, role_id, agents_src, []))
             print(f"  {ok('Updated')} {label(r).strip()}")
         except Abort as e:
             print(f"  {warn('Error')} updating {label(r).strip()}: {e}")

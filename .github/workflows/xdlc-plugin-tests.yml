@@ -1,6 +1,6 @@
 # Kiểm lệnh xdlc và plugin xora-dev trên macOS, Linux, Windows (Python 3.9 và 3.13):
 # cài qua install.sh / install.ps1, setup / remove, OAuth + MCP proxy với backend giả, sensor, hook Claude,
-# menu phím mũi tên (pty, chỉ macOS / Linux). Chạy agents-plugin/test_roles.py, không ra mạng.
+# menu phím mũi tên (pty, chỉ macOS / Linux). Chạy test_roles.py, không ra mạng.
 name: xdlc & plugin tests
 
 on:
@@ -28,5 +28,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Run agents-plugin/test_roles.py
-        run: python agents-plugin/test_roles.py
+      - name: Run test_roles.py
+        run: python test_roles.py

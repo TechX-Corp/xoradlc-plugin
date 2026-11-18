@@ -98,20 +98,18 @@ Commands:
   link       Map the current branch to a work order (for agent convention alerts)
   login      Log in to Xora DLC
   logout     Log out of Xora DLC on this machine
-  status     Backend, signed-in account and role, and where setup is installed
-  use        Choose backend: deployed (prod) or local
+  status     Signed-in account and role, and where setup is installed
   update     Update xdlc and the plugin to the latest release
   uninstall  Remove Xora DLC entirely from this machine
 
 Options:
-  -v, --version  Installed version and latest release
+  -v, --version  Print installed version
   -h, --help     This command list
 
 Shortcuts (skip terminal prompts):
   xdlc setup -a, --agent kiro|claude  -s, --scope global|local
   xdlc remove -a, --agent kiro|claude
   xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]
-  xdlc use prod | xdlc use local [-u, --url URL]
 
 Scope: global = every repo on this machine; local = current project, git does not track xdlc files.
 For details on one command: xdlc <command> --help
@@ -133,7 +131,6 @@ For details on one command: xdlc <command> --help
 
 - Errors (agent reports `forbidden`, MCP `xora-dev` missing…): run `xdlc status` to see which account and role are in use and where setup is installed.
 - Wrong account: sign out on the Xora DLC web app, then run `xdlc logout` and `xdlc login`.
-- After `xdlc use`: open a new agent session.
 - If ↑/↓ does not change the menu: set `XDLC_PLAIN=1` to select by typing numbers.
 
   **macOS / Linux / WSL:**

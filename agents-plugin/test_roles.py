@@ -61,7 +61,7 @@ def check_kiro():
 
 def check_xdlc():
     """xdlc: cài qua install.sh, setup / remove Kiro (project, local), login OAuth + MCP proxy với backend giả,
-    status, use, version, uninstall. HOME tạm, không ra mạng."""
+    status, version, uninstall. HOME tạm, không ra mạng."""
     import http.server, threading, base64, hashlib, urllib.parse, urllib.request
     repo = ROOT.parent
     cli = repo / "xdlc"
@@ -132,7 +132,8 @@ def check_xdlc():
         home = Path(tmp) / "home"; home.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("XDLC_", "XORA_"))} | {
             "HOME": str(home), "USERPROFILE": str(home), "XDLC_PLUGIN_DIR": str(repo), "XDLC_NO_BROWSER": "1",
-            "XDLC_BIN_DIR": str(home / "bin"), "XDLC_NO_PATH": "1"}
+            "XDLC_BIN_DIR": str(home / "bin"), "XDLC_NO_PATH": "1",
+            "XDLC_API_URL": f"http://127.0.0.1:{srv.server_port}"}
         xdlc = home / "bin" / ("xdlc.py" if WIN else "xdlc")
 
         def x(*args, cwd=None, inp="", ok=True):
@@ -157,6 +158,7 @@ def check_xdlc():
         readme = (ROOT / "README.md").read_text(encoding="utf-8").split("```text\n", 1)[1].split("\n```", 1)[0]
         assert x().rstrip("\n") == readme, "README Commands section must match `xdlc` output exactly"
         assert "unknown command" in x("nope", ok=False)
+        assert "unknown command" in x("use", ok=False)
 
         # setup Kiro Local ở ws (không phải git repo; đã có server và skill riêng của team).
         ws = Path(tmp) / "ws"; (ws / ".kiro" / "settings").mkdir(parents=True)
@@ -216,9 +218,7 @@ def check_xdlc():
                 assert g(r, "status", "--porcelain").strip() == "M .kiro/settings/mcp.json", "giữ: git thấy khối xora-dev"
         assert "Reinstalled" in x("setup", "--agent", "kiro", "--scope", "local", cwd=Path(tmp) / "tk"), "lần sau nhớ lựa chọn, không hỏi lại"
 
-        # login OAuth (backend giả), status, MCP proxy
-        x("use", "local", "-u", f"http://127.0.0.1:{srv.server_port}")
-        assert "only for local" in x("use", "prod", "-u", "http://x", ok=False) and "only for local" in x("use", "prod", "--url", "http://x", ok=False)
+        # login OAuth (fake API via XDLC_API_URL), status, MCP proxy
         mcp_in = "\n".join(json.dumps(m) for m in (
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
@@ -238,9 +238,9 @@ def check_xdlc():
         if WIN:  # DPAPI: file không chứa token dạng rõ
             assert list(auth) == ["dpapi"] and "at-1" not in json.dumps(auth), auth
         else:
-            assert oct((home / ".xdlc" / "auth.json").stat().st_mode & 0o777) == "0o600" and auth["local"]["access_token"] == "at-1"
+            assert oct((home / ".xdlc" / "auth.json").stat().st_mode & 0o777) == "0o600" and auth["access_token"] == "at-1"
         st = x("status")
-        assert "Dat Dev" in st and "local" in st and st.count("Kiro    Local") == 4, st
+        assert "Dat Dev" in st and "Backend" not in st and "Agent" in st and "Scope" in st and st.count("Kiro") == 4, st
         resp = {r["id"]: r for r in map(json.loads, x("mcp", inp=mcp_in).splitlines())}
         assert resp[3]["result"]["content"][0]["text"] == "Việc của bạn: WO-1", resp[3]
         assert any(m.get("method") == "tools/call" and m["params"]["name"] == "xora_ask" for m in seen["mcp"]), seen

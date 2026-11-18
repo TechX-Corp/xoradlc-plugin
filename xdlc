@@ -2,8 +2,8 @@
 """xdlc: Xora DLC for Claude Code and Kiro CLI (xora-dev plugin, login, update).
 
 One file, stdlib only, Python 3.9+. xdlc stores the Xora DLC login token (OAuth, PKCE) in ~/.xdlc and
-runs a local MCP server `xdlc mcp` for the agent: every MCP request is forwarded to <backend>/mcp/user with the token.
-Writes on disk: ~/.xdlc (config, token, plugin bundle, setup list) and the files that `xdlc setup` installs.
+runs a local MCP server `xdlc mcp` for the agent: every MCP request is forwarded to the Xora DLC API with the token.
+Writes on disk: ~/.xdlc (token, plugin bundle, setup list) and the files that `xdlc setup` installs.
 """
 import base64
 import hashlib
@@ -31,7 +31,6 @@ from pathlib import Path
 VERSION = "0.2.1"
 REPO = "TechX-Corp/xoradlc-plugin"
 PROD_URL = "https://xoradlc-platform-api.techxcorp.com"
-LOCAL_URL = "http://localhost:8000"
 CLIENT_ID = "xora-plugin"
 SERVER = "xora-dev"  # MCP server name in the agent
 MARKET = "xora-role-plugins"
@@ -63,20 +62,18 @@ Commands:
   link       Map the current branch to a work order (for agent convention alerts)
   login      Log in to Xora DLC
   logout     Log out of Xora DLC on this machine
-  status     Backend, signed-in account and role, and where setup is installed
-  use        Choose backend: deployed (prod) or local
+  status     Signed-in account and role, and where setup is installed
   update     Update xdlc and the plugin to the latest release
   uninstall  Remove Xora DLC entirely from this machine
 
 Options:
-  -v, --version  Installed version and latest release
+  -v, --version  Print installed version
   -h, --help     This command list
 
 Shortcuts (skip terminal prompts):
   xdlc setup -a, --agent kiro|claude  -s, --scope global|local
   xdlc remove -a, --agent kiro|claude
   xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]
-  xdlc use prod | xdlc use local [-u, --url URL]
 
 Scope: global = every repo on this machine; local = current project, git does not track xdlc files.
 For details on one command: xdlc <command> --help
@@ -97,16 +94,13 @@ CMD_HELP = {
             "so agent convention alerts (xdlc sensor report) go to the right work order. No args: menu of in-progress steps\n"
             "(from My Work). WO-…: pick directly (add --step if that WO has multiple steps). --list: print the current map\n"
             "and available steps.",
-    "login": "xdlc login\n\nOpens the browser to the Xora DLC login page (SSO or local account) for the current backend.\n"
+    "login": "xdlc login\n\nOpens the browser to the Xora DLC login page (SSO or local account).\n"
              "If the browser is already signed in on the web, that account is used: xdlc prints the account for you to check.",
-    "logout": "xdlc logout\n\nDeletes the Xora DLC token for the current backend from this machine.",
-    "status": "xdlc status\n\nPrints version, current backend, signed-in account and role, and setups.",
-    "use": "xdlc use [prod|local] [-u, --url URL]\n\nNo args: print current backend. prod = deployed, local = backend on this machine\n"
-           "(default http://localhost:8000; --url changes and remembers it). Tokens are separate per backend.\n"
-           "After switching, open a new agent session (or reconnect in /mcp).",
+    "logout": "xdlc logout\n\nDeletes the Xora DLC token from this machine.",
+    "status": "xdlc status\n\nPrints version, signed-in account and role, and setups.",
     "update": "xdlc update\n\nDownloads the latest release (git tag vX.Y.Z), replaces xdlc and the plugin, then reinstalls into every setup.\n"
               "If there is no release tag yet, falls back to the tip of main (temporary).",
-    "--version": "xdlc --version (or -v)\n\nPrints xdlc version, installed plugin version, and the latest release if available.",
+    "--version": "xdlc --version (or -v)\n\nPrints the installed version.",
     "uninstall": "xdlc uninstall\n\nRemoves every setup, logs out, deletes ~/.xdlc and the xdlc command itself. Asks for confirmation first.",
 }
 
@@ -139,6 +133,39 @@ def err(msg):
 def short(p):
     s = str(p)
     return "~" + s[len(str(HOME)):] if s == str(HOME) or s.startswith(str(HOME) + os.sep) else s
+
+
+def print_table(headers, rows, indent="  "):
+    """Print a bordered table (columns / rows / cells). ASCII when XDLC_PLAIN or dumb TERM."""
+    cols = list(headers)
+    data = [list(r) for r in rows]
+    widths = [len(h) for h in cols]
+    for row in data:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+    plain = bool(os.environ.get("XDLC_PLAIN") or os.environ.get("TERM") == "dumb")
+    if plain:
+        h, v, x = "-", "|", "+"
+        tl, tr, bl, br = x, x, x, x
+        l, r, t, b = x, x, x, x
+    else:
+        h, v = "─", "│"
+        tl, tr, bl, br = "┌", "┐", "└", "┘"
+        l, r, t, b, x = "├", "┤", "┬", "┴", "┼"
+
+    def line(left, mid, right, fill=h):
+        return indent + left + mid.join(fill * (w + 2) for w in widths) + right
+
+    def row_line(cells):
+        body = v.join(f" {c:<{widths[i]}} " for i, c in enumerate(cells))
+        return f"{indent}{v}{body}{v}"
+
+    print(line(tl, t, tr))
+    print(row_line(cols))
+    print(line(l, x, r))
+    for row in data:
+        print(row_line(row))
+    print(line(bl, b, br))
 
 
 def load_json(path, default):
@@ -476,16 +503,11 @@ def shell_cmd(argv):
     return " ".join('"' + a.replace("\\", "/") + '"' if (" " in a or "\\" in a or "/" in a) else a for a in argv)
 
 
-# ── config, backend, tokens ────────────────────────────────────────────────────────────────────────────
+# ── API, tokens ─────────────────────────────────────────────────────────────────────────────────────────
 
-def config():
-    c = load_json(XDLC / "config.json", {})
-    return {"env": c.get("env") or "prod", "local_url": c.get("local_url") or LOCAL_URL}
-
-
-def base_url(c=None):
-    c = c or config()
-    return (PROD_URL if c["env"] == "prod" else c["local_url"]).rstrip("/")
+def base_url():
+    """Xora DLC API. XDLC_API_URL overrides for tests only — users always hit prod."""
+    return (os.environ.get("XDLC_API_URL") or PROD_URL).rstrip("/")
 
 
 def request(method, url, *, body=None, form=None, token=None, timeout=30):
@@ -546,46 +568,48 @@ def _auth():
     return raw
 
 
-def tokens(env=None):
-    return _auth().get(env or config()["env"])
-
-
-def save_tokens(env, t):
+def tokens():
+    """Login token dict, or None. Migrates legacy auth.json keyed by env (prod/local)."""
     auth = _auth()
-    if t is None:
-        auth.pop(env, None)
-    else:
-        auth[env] = t
+    if not auth:
+        return None
+    if "access_token" in auth:
+        return auth
+    t = auth.get("prod")
+    return t if isinstance(t, dict) and t.get("access_token") else None
+
+
+def save_tokens(t):
+    auth = {} if t is None else t
     if WINDOWS:
         auth = {"dpapi": base64.b64encode(_dpapi(json.dumps(auth).encode("utf-8"), protect=True)).decode()}
     save_json(XDLC / "auth.json", auth, private=True)
 
 
-def _store(env, granted):
+def _store(granted):
     t = {"access_token": granted["access_token"], "refresh_token": granted.get("refresh_token"),
          "expires_at": int(time.time()) + int(granted.get("expires_in") or 3600)}
-    save_tokens(env, t)
+    save_tokens(t)
     return t
 
 
 def access_token(force_refresh=False):
-    """Valid access token for the current backend (auto-refresh), None when logged out / session expired."""
+    """Valid access token (auto-refresh), None when logged out / session expired."""
     with _token_lock:
-        c = config()
-        t = tokens(c["env"])
+        t = tokens()
         if not t:
             return None
         if not force_refresh and t["expires_at"] - 60 > time.time():
             return t["access_token"]
         if not t.get("refresh_token"):
             return None
-        status, out = request("POST", base_url(c) + "/oauth/token",
+        status, out = request("POST", base_url() + "/oauth/token",
                               form={"grant_type": "refresh_token", "refresh_token": t["refresh_token"],
                                     "client_id": CLIENT_ID})
         if status == 200 and isinstance(out, dict) and out.get("access_token"):
-            return _store(c["env"], out)["access_token"]
+            return _store(out)["access_token"]
         if status in (400, 401):  # refresh token expired / account locked: must log in again
-            save_tokens(c["env"], None)
+            save_tokens(None)
         return None
 
 
@@ -817,16 +841,20 @@ def repo_identity(root):
 
 
 def links():
-    return load_json(XDLC / "links.json", {})
+    """Branch→work-order maps by repo. Migrates legacy links.json keyed by env (keeps prod only)."""
+    data = load_json(XDLC / "links.json", {})
+    if "prod" in data or "local" in data:
+        return dict(data.get("prod") or {})
+    return data
 
 
-def link_of(repo_id, branch, env=None):
-    return links().get(env or config()["env"], {}).get(repo_id, {}).get(branch)
+def link_of(repo_id, branch):
+    return links().get(repo_id, {}).get(branch)
 
 
 def save_link(repo_id, branch, step):
     data = links()
-    data.setdefault(config()["env"], {}).setdefault(repo_id, {})[branch] = {
+    data.setdefault(repo_id, {})[branch] = {
         k: step.get(k) for k in ("work_order_id", "work_order_name", "step_id", "step_name")}
     save_json(XDLC / "links.json", data)
 
@@ -892,7 +920,7 @@ def changed_files(root):
 
 
 def my_steps():
-    """Steps you are working on (My Work: steps_in_progress) on the current backend."""
+    """Steps you are working on (My Work: steps_in_progress)."""
     status, out = api("GET", "/my-work")
     if status is None:
         raise Abort("Not logged in to Xora DLC: run xdlc login.")
@@ -904,7 +932,7 @@ def my_steps():
 
 
 def pick_step(branch, steps):
-    return steps[choose(f"Map branch {branch} to which step? (My Work on {config()['env']})",
+    return steps[choose(f"Map branch {branch} to which step? (My Work)",
                         [(i, step_label(st)) for i, st in enumerate(steps)])]
 
 
@@ -953,7 +981,7 @@ def pre_push_still_needed(root, items):
     if any(r["scope"] == "local" and Path(r["path"]).is_dir() and git_root(r["path"]) == root for r in items):
         return True
     repo_id, _ = repo_identity(root)
-    return any(repo_id in per_env for per_env in links().values())
+    return repo_id in links()
 
 
 def _attach_tty():
@@ -1020,7 +1048,7 @@ def setup_kiro(bundle, scope, path, old, interactive):
     cfg = load_json(mcp_file, {})
     cfg.setdefault("mcpServers", {})[SERVER] = {**mcp_entry(), "disabled": False, "autoApprove": []}
     save_json(mcp_file, cfg)
-    rec = {"agent": "kiro", "scope": scope, "path": str(base), "version": bundle_version(),
+    rec = {"agent": "kiro", "scope": scope, "path": str(base), "version": VERSION,
            "files": files, "mcp_json": MCP_REL, "created_mcp_json": created, "git_tracked": git_choice}
     if scope == "local":
         excluded = [r for r in files if git_choice != "keep" or r not in git_tracked(base, [r])]
@@ -1088,7 +1116,7 @@ def setup_claude(bundle, scope, path, old, interactive):
         raise Abort(f"claude plugin install failed:\n{(r.stderr or r.stdout).strip()}")
     if scope == "local" and git_choice != "keep":
         set_exclude(path, [CLAUDE_LOCAL])
-    return {"agent": "claude", "scope": scope, "path": str(path), "version": bundle_version(), "git_tracked": git_choice}
+    return {"agent": "claude", "scope": scope, "path": str(path), "version": VERSION, "git_tracked": git_choice}
 
 
 def remove_claude(rec, interactive):
@@ -1369,8 +1397,7 @@ class _Callback(http.server.BaseHTTPRequestHandler):
 def cmd_login(argv):
     if argv:
         raise Abort("login takes no options.", 2)
-    c = config()
-    base = base_url(c)
+    base = base_url()
     status, meta = request("GET", base + "/.well-known/oauth-authorization-server")
     if status != 200 or not isinstance(meta, dict):
         raise Abort(f"Could not load login metadata from {base} ({meta if status == 0 else 'HTTP ' + str(status)}).")
@@ -1383,7 +1410,7 @@ def cmd_login(argv):
     url = meta["authorization_endpoint"] + "?" + urllib.parse.urlencode({
         "response_type": "code", "client_id": CLIENT_ID, "redirect_uri": redirect,
         "code_challenge": challenge, "code_challenge_method": "S256", "state": state})
-    print(f"Sign in to {em('Xora DLC')} ({em(c['env'])}). "
+    print(f"Sign in to {em('Xora DLC')}. "
           f"Open this page if the browser does not open:\n{url}", flush=True)
     if not os.environ.get("XDLC_NO_BROWSER"):
         webbrowser.open(url)
@@ -1404,7 +1431,7 @@ def cmd_login(argv):
         "client_id": CLIENT_ID, "code_verifier": verifier})
     if status != 200 or not isinstance(out, dict) or not out.get("access_token"):
         raise Abort(f"Token exchange failed: {out}")
-    _store(c["env"], out)
+    _store(out)
     u, why = whoami()
     print(f"{ok('Signed in:')} " + (account_line(u) if u else f"(could not read account: {why})"))
     if u and not u.get("role"):
@@ -1417,29 +1444,21 @@ def cmd_login(argv):
 def cmd_logout(argv):
     if argv:
         raise Abort("logout takes no options.", 2)
-    c = config()
-    if not tokens(c["env"]):
-        print(f"Not logged in ({em(c['env'])}).")
+    if not tokens():
+        print("Not logged in.")
         return
-    save_tokens(c["env"], None)
-    print(f"Logged out of {em('Xora DLC')} ({em(c['env'])}). "
+    save_tokens(None)
+    print(f"Logged out of {em('Xora DLC')}. "
           + dim(f"The agent needs {em('xdlc login')} again."))
 
 
 def cmd_status(argv):
     if argv:
         raise Abort("status takes no options.", 2)
-    c = config()
-    plugin = bundle_version() or dim("not downloaded")
-    print(f"{bold('xdlc')} {VERSION} · plugin {plugin}")
-    print()
-    if c["env"] == "local":
-        print(f"{bold('Backend:')} {em(c['env'])}  {dim(base_url(c))}")
-    else:
-        print(f"{bold('Backend:')} {em(c['env'])}")
+    print(f"{bold('Version:')} xdlc {VERSION}")
     print()
     u, why = whoami()
-    t = tokens(c["env"])
+    t = tokens()
     exp = time.strftime("%H:%M %d/%m", time.localtime(t["expires_at"])) if t else ""
     print(f"{bold('Account:')} " + (f"{account_line(u)} · token expires {exp} (auto-refresh)" if u else why))
     root = git_root(Path.cwd())
@@ -1448,47 +1467,22 @@ def cmd_status(argv):
         branch = git_out(root, "branch", "--show-current")
         repo_id, _ = repo_identity(root)
         cur = link_of(repo_id, branch) if branch else None
-        mapped = step_label(cur) if cur else dim("no work order mapped (xdlc link)")
-        print(f"{bold('Current repo:')} {em(repo_id)} · branch {em(branch or '(detached HEAD)')} → {mapped}")
-        print(dim("Convention alerts: agent runs xdlc sensor / sensor report on commit/push "
-                  f"(map branch with {em('xdlc link')})."))
+        mapped = step_label(cur) if cur else dim("no work order mapped")
+        print(f"{bold('Current repo:')} {em(repo_id)} · {em(branch or '(detached HEAD)')} → {mapped}")
+        print(dim(f"  Convention alerts on commit/push — {em('xdlc sensor')}, map with {em('xdlc link')}."))
     print()
     items = installs()
     print(f"{bold('Setups:')}" + ("" if items else dim(" none (run xdlc setup)")))
-    for i, r in enumerate(items, 1):
-        print(f"  {i}. {label(r)}   v{r.get('version') or '?'}")
+    if items:
+        rows = []
+        for r in items:
+            agent = AGENTS[r["agent"]].split()[0]
+            scope = SCOPE_NAME.get(r["scope"], r["scope"])
+            if r["scope"] != "global":
+                scope = f"{scope}  {short(r['path'])}"
+            rows.append((agent, scope))
+        print_table(("Agent", "Scope"), rows)
 
-
-def cmd_use(argv):
-    argv = long_opts(argv)
-    c = config()
-
-    def using_line(cfg):
-        if cfg["env"] == "local":
-            return f"{bold('Using:')} {em(cfg['env'])}  {dim(base_url(cfg))}"
-        return f"{bold('Using:')} {em(cfg['env'])}"
-
-    if not argv:
-        print(using_line(c))
-        print(dim("Switch: ") + em("xdlc use prod") + dim(" | ") + em("xdlc use local")
-              + dim(" [") + em("-u") + dim(", ") + em("--url URL") + dim("]"))
-        return
-    env, rest = argv[0], argv[1:]
-    if env not in ("prod", "local"):
-        raise Abort("xdlc use prod | xdlc use local [-u, --url URL]", 2)
-    if rest:
-        if env != "local" or len(rest) != 2 or rest[0] != "--url" or not rest[1].startswith(("http://", "https://")):
-            raise Abort("-u / --url is only for local, e.g. xdlc use local -u http://localhost:9000", 2)
-        c["local_url"] = rest[1].rstrip("/")
-    changed = env != c["env"] or bool(rest)
-    c["env"] = env
-    save_json(XDLC / "config.json", c)
-    print(using_line(c))
-    if not tokens(env):
-        print(dim("Not logged in to this backend: run ") + em("xdlc login") + dim("."))
-    if changed:
-        print(dim("Open a new agent session (or reconnect ") + em("xora-dev")
-              + dim(" in ") + em("/mcp") + dim(") so the agent uses the new backend."))
 
 
 def reapply(items, interactive):
@@ -1541,18 +1535,7 @@ def cmd_update(argv):
 
 
 def cmd_version(argv):
-    plugin = bundle_version()
     print(f"{bold('xdlc')} {VERSION}")
-    print(f"{bold('plugin')} {plugin or dim('not downloaded (run xdlc setup)')}")
-    print()
-    items = installs()
-    print(f"{bold('Setups:')}" + ("" if items else dim(" none")))
-    for i, r in enumerate(items, 1):
-        print(f"  {i}. {label(r)}   v{r.get('version') or '?'}")
-    latest = latest_release()
-    if latest and _semver(latest) > _semver(VERSION):
-        print()
-        print(dim(f"Newer release {em(latest)}: run {em('xdlc update')}."))
 
 
 def _remove_from_user_path(folder):
@@ -1580,7 +1563,7 @@ def cmd_uninstall(argv):
     hooks = load_json(XDLC / "hooks.json", [])
     for h in hooks:
         print(f"  - {bold('hook pre-push:')} {short(h)}")
-    print(f"  - {bold('data:')} login token, work order maps, config, and plugin bundle ({short(XDLC)})")
+    print(f"  - {bold('data:')} login token, work order maps, and plugin bundle ({short(XDLC)})")
     print(f"  - {bold('command:')} {short(xdlc_path())}")
     print()
     if not confirm("Continue?"):
@@ -1623,8 +1606,7 @@ def _local_answer(msg, reason):
 
 
 def _forward(msg):
-    c = config()
-    url = base_url(c) + "/mcp/user"
+    url = base_url() + "/mcp/user"
     token = access_token()
     if token:
         status, out = request("POST", url, body=msg, token=token, timeout=600)
@@ -1637,13 +1619,13 @@ def _forward(msg):
         if status == 200 and isinstance(out, dict):
             return out
         if status == 0:
-            reason = f"Could not connect to Xora DLC ({base_url(c)}): {out}. Check the network / backend and ask again."
+            reason = f"Could not connect to Xora DLC ({base_url()}): {out}. Check the network and ask again."
         elif status == 401:
-            reason = f"Xora DLC session ({c['env']}) expired. Run `xdlc login` in a terminal and ask again."
+            reason = "Xora DLC session expired. Run `xdlc login` in a terminal and ask again."
         else:
             reason = f"Xora DLC returned HTTP {status}: {out}"
     else:
-        reason = (f"Not logged in to Xora DLC ({c['env']}: {base_url(c)}). "
+        reason = (f"Not logged in to Xora DLC ({base_url()}). "
                   "Run `xdlc login` in a terminal and ask again.")
     if "id" not in msg:
         return None
@@ -1651,7 +1633,7 @@ def _forward(msg):
 
 
 def cmd_mcp(argv):
-    """stdio JSON-RPC ↔ <backend>/mcp/user. One thread per request: a long xora_ask does not block ping."""
+    """stdio JSON-RPC ↔ Xora DLC /mcp/user. One thread per request: a long xora_ask does not block ping."""
     out_lock = threading.Lock()
 
     def handle(line):
@@ -1820,7 +1802,7 @@ def cmd_link(argv):
         chosen = cands[0]
     else:
         if not steps:
-            raise Abort(f"You have no in-progress steps in Xora DLC ({config()['env']}): nothing to map.")
+            raise Abort("You have no in-progress steps in Xora DLC: nothing to map.")
         chosen = pick_step(branch, steps)
     save_link(repo_id, branch, chosen)
     was = ""
@@ -1834,7 +1816,7 @@ def cmd_reapply(argv):
 
 
 COMMANDS = {"setup": cmd_setup, "remove": cmd_remove, "link": cmd_link, "login": cmd_login, "logout": cmd_logout,
-            "status": cmd_status, "use": cmd_use, "update": cmd_update, "uninstall": cmd_uninstall}
+            "status": cmd_status, "update": cmd_update, "uninstall": cmd_uninstall}
 # "version": old name for --version; still works but hidden from the list.
 HIDDEN = {"mcp": cmd_mcp, "sensor": cmd_sensor, "_print": cmd_print, "_reapply": cmd_reapply, "version": cmd_version}
 

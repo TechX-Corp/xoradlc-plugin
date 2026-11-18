@@ -9,18 +9,6 @@
           }
         ]
       }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/sensor/convention_sensor.py\" --hook claude",
-            "timeout": 30
-          }
-        ]
-      }
     ]
   }
 }

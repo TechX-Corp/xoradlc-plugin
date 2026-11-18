@@ -4,7 +4,7 @@ The `xora-dev` plugin brings Xora DLC into the coding agent you already use (Kir
 
 - **Ask Xora DLC from the agent**: my work, work-order status, step BRD / design, open questions, conventions and internal precedents; answers include citations.
 - **Ready-made working standards**: `implement` skill (code from approved BRD / design), `changeset` (PR dossier), `upload-tech-doc` (save docs to the KB), plus agent rules.
-- **Convention checks**: after the agent edits code, the sensor checks the repo `convention.md` and warns; on `git push`, alerts go to the Xora DLC Governance screen.
+- **Convention checks**: when you ask the agent to commit/push, it runs `xdlc sensor` (convention from AAP/KB), reports mismatches, and can post governance alerts via `xdlc sensor report` if you push anyway.
 
 ## Prerequisites
 
@@ -60,7 +60,7 @@ xdlc setup --agent kiro --scope global
 |---|---|---|
 | `-a`, `--agent` | `kiro` | Kiro CLI |
 | | `claude` | Claude Code |
-| `-s`, `--scope` | `local` | Current project only; git does not track `xdlc` files. Also installs a `git push` hook to send convention alerts to Xora DLC |
+| `-s`, `--scope` | `local` | Current project only; git does not track `xdlc` files |
 | | `global` | Every repo on this machine |
 
 Omit a flag and `xdlc` asks in the terminal (↑/↓ to move, Enter to select). If the team already committed plugin files into the repo, `xdlc` asks whether to untrack them from git or keep them tracked.
@@ -71,14 +71,11 @@ Omit a flag and `xdlc` asks in the terminal (↑/↓ to move, Enter to select). 
 xdlc login
 ```
 
-**3. (Optional) Send convention alerts to Xora DLC on `git push`:** map the current branch to the step you are working on:
+**3. (Optional) Map the branch for convention alerts:** needed so the agent can post gov alerts with `xdlc sensor report` after a push-anyway confirm:
 
 ```bash
 xdlc link
 ```
-
-- **Local:** hook already installed; `xdlc link` maps the branch (or the first push asks). Skip → push may not send alerts.
-- **Global:** run `xdlc link` in the repo to install the hook and map. Skip → pushes never send alerts.
 
 **4. Open a new agent session in the project and ask**, for example:
 
@@ -96,7 +93,7 @@ Usage: xdlc <command> [options]
 Commands:
   setup      Install the xora-dev plugin for Kiro CLI or Claude Code
   remove     Remove one or more setups
-  link       Pick a work order for the current branch (sensor sends alerts on git push)
+  link       Map the current branch to a work order (for agent convention alerts)
   login      Log in to Xora DLC
   logout     Log out of Xora DLC on this machine
   status     Backend, signed-in account and role, and where setup is installed

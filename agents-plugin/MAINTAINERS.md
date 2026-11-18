@@ -6,7 +6,7 @@ This file is not needed by plugin users; see [README.md](README.md) for usage.
 
 - `xdlc` (a single Python file at the repo root) installs the `xora-dev` plugin (`dev/`) for Kiro CLI or Claude Code, stores the OAuth token in `~/.xdlc/auth.json` (Windows: DPAPI), and runs a local MCP server `xdlc mcp` (stdio). `xdlc mcp` forwards every request to `<backend>/mcp/user` with the token.
 - Tool `xora_ask`: the Xora DLC backend takes the question like web chat, attaches the role and MCP session, then hands it to that role’s AAP agent; AAP picks Xora DLC MCP functions itself.
-- The convention sensor runs right after install with no extra steps: if the repo has `convention.md` (at the root or under `docs/`), it uses the repo rules; otherwise it uses the plugin default (currently no rules; more will be added later). Details: [dev/README.md](dev/README.md#sensor-chạy-thế-nào). Alerts on push: [dev/README.md](dev/README.md#gửi-cảnh-báo-về-xora-dlc).
+- Convention checks: agent runs `xdlc sensor` (AAP NL) on commit/push request; `xdlc sensor report` posts `POST /governance/sensor-events`. No local `convention_sensor.py` / plugin pre-push.
 
 ## Checks before opening a PR
 

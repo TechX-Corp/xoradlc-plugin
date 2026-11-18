@@ -7,6 +7,7 @@ Writes on disk: ~/.xdlc (config, token, plugin bundle, setup list) and the files
 """
 import base64
 import hashlib
+import html
 import http.server
 import json
 import os
@@ -185,6 +186,57 @@ def _enable_vt():
         return False
 
 
+_COLOR = None  # cached: None unknown, True/False after first probe
+
+
+def color_enabled():
+    """ANSI colors when stdout is a TTY; off for pipe/CI, NO_COLOR, XDLC_PLAIN, TERM=dumb."""
+    global _COLOR
+    if _COLOR is not None:
+        return _COLOR
+    if os.environ.get("NO_COLOR") or os.environ.get("XDLC_PLAIN") or os.environ.get("TERM") == "dumb":
+        _COLOR = False
+    elif not sys.stdout.isatty():
+        _COLOR = False
+    elif WINDOWS:
+        _COLOR = _enable_vt()
+    else:
+        _COLOR = True
+    return _COLOR
+
+
+def _paint(text, *codes):
+    if not text or not color_enabled():
+        return text
+    return f"\x1b[{';'.join(str(c) for c in codes)}m{text}\x1b[0m"
+
+
+def bold(text):
+    return _paint(text, 1)
+
+
+def dim(text):
+    return _paint(text, 2)
+
+
+def focus(text):
+    """Focused menu label: bold cyan."""
+    return _paint(text, 1, 36)
+
+
+def em(text):
+    """Proper nouns / jargon accent: cyan."""
+    return _paint(text, 36)
+
+
+def ok(text):
+    return _paint(text, 32)
+
+
+def warn(text):
+    return _paint(text, 33)
+
+
 def arrow_keys():
     """Arrow-key menus when stdin/stdout are a real terminal; otherwise (pipe, CI, ANSI-unaware console,
     XDLC_PLAIN=1) type numbers."""
@@ -245,7 +297,7 @@ class _Raw:
 
 def menu(title, labels, multi=False):
     """↑/↓ move, Enter select; multi: Space mark, a = all. Esc / q cancel. → selected indices.
-    Single: ◉/○ radio; multi: > focus + [ ]/[x]."""
+    Single: ◉/○ radio; multi: > focus + □/■. Focused label is cyan."""
     fd, n = sys.stdin.fileno(), len(labels)
     cols = shutil.get_terminal_size((80, 24)).columns
     width = cols - 1 if cols >= 40 else 10_000  # unknown width: do not truncate lines
@@ -259,12 +311,20 @@ def menu(title, labels, multi=False):
             out.write(f"\x1b[{n + 1}A")
         for i, text in enumerate(labels):
             if multi:
-                box = "[x] " if i in marked else "[ ] "
+                box = "■ " if i in marked else "□ "
                 prefix = f"{'>' if i == cur else ' '} {box}"
             else:
                 prefix = "◉ " if i == cur else "○ "
-            out.write("\r\x1b[2K" + f"{prefix}{text}"[:width] + "\n")
-        out.write("\r\x1b[2K" + (hint or tips)[:width] + "\n")
+            room = max(0, width - len(prefix))
+            label = text if len(text) <= room else text[:room]
+            line = prefix + label
+            if i == cur:
+                line = focus(line)  # radio / arrow+checkbox + label
+            out.write("\r\x1b[2K" + line + "\n")
+        tip = hint or tips
+        if len(tip) > width:
+            tip = tip[:width]
+        out.write("\r\x1b[2K" + dim(tip) + "\n")
         out.flush()
 
     print(title)
@@ -298,7 +358,7 @@ def menu(title, labels, multi=False):
         out.write(f"\x1b[{n + 1}A\x1b[J\x1b[?25h")  # clear menu, show cursor again
         out.flush()
     for i in result:
-        print(f"  › {labels[i]}")
+        print(f"  › {bold(labels[i])}")
     return result
 
 
@@ -1082,7 +1142,8 @@ def cmd_setup(argv):
     if agent == "claude":
         need_claude()
     elif not shutil.which("kiro-cli"):
-        print("Note: command 'kiro-cli' not found on this machine; installing anyway — Kiro will use it once Kiro CLI is installed.")
+        print(warn("Note:") + dim(f" command 'kiro-cli' not found on this machine; installing anyway — "
+                                   f"{em('Kiro')} will use it once {em('Kiro CLI')} is installed."))
     cwd = Path.cwd()
     scope = opt.get("scope") or choose(f"Where to install for {AGENTS[agent]}?", [
         ("global", "Global  every repo on this machine"),
@@ -1099,17 +1160,21 @@ def cmd_setup(argv):
     rec = SETUP[agent](bundle, scope, path, old, True)
     items = [r for r in items if not same(r, rec)] + [rec]
     save_installs(items)
-    print(f"{'Reinstalled' if old else 'Installed'} xora-dev for {AGENTS[agent]}: {label(rec).strip()}")
+    verb = "Reinstalled" if old else "Installed"
+    print(f"{ok(verb)} {em('xora-dev')} for {em(AGENTS[agent])}: {label(rec).strip()}")
     if any(r["agent"] == agent and r["scope"] == "global" for r in items) and \
             any(r["agent"] == agent and r["scope"] == "local" and r["path"] == str(cwd) for r in items):
-        print("Note: both Global and Local exist for this project; Local is used, Global is redundant here.")
+        print(warn("Note:") + dim(f" both Global and Local exist for this project; "
+                                  f"{em('Local')} is used, Global is redundant here."))
     root = git_root(path) if scope == "local" else None
     if root and install_pre_push(root):
-        print("Installed git pre-push hook: on push, the sensor sends alerts to Xora DLC (first push per branch asks for a work order).")
+        print(ok("Installed") + dim(f" git pre-push hook: on push, the sensor sends alerts to {em('Xora DLC')} "
+                                    f"(first push per branch asks for a work order)."))
     elif scope == "global":
-        print("To send convention alerts to Xora DLC on push: in each repo (without Local setup) run xdlc link.")
+        print(dim(f"To send convention alerts to {em('Xora DLC')} on push: in each repo "
+                  f"(without Local setup) run {em('xdlc link')}."))
     tip = "open a new Kiro session" if agent == "kiro" else "open a new Claude Code session (accept the xora-dev MCP server if asked)"
-    print(f"Next: {tip}." + ("" if tokens() else " Not logged in: run xdlc login."))
+    print(dim(f"Next: {tip}." + ("" if tokens() else f" Not logged in: run {em('xdlc login')}.")))
 
 
 def cmd_remove(argv):
@@ -1146,17 +1211,129 @@ def cmd_remove(argv):
         REMOVE[r["agent"]](r, True)
         items = [x for x in items if not same(x, r)]
         save_installs(items)
-        print(f"Removed {label(r).strip()}")
+        print(f"{ok('Removed')} {label(r).strip()}")
         root = git_root(r["path"]) if r["scope"] == "local" and Path(r["path"]).is_dir() else None
         if root and (hook := pre_push_of(root)):
             if pre_push_still_needed(root, items):
-                print("  Keeping pre-push hook: repo still has a branch mapped to a work order (xdlc link).")
+                print(dim("  Keeping pre-push hook: repo still has a branch mapped to a work order "
+                          f"({em('xdlc link')})."))
             else:
                 remove_pre_push(hook)
-                print("  Removed pre-push hook.")
+                print(dim("  Removed pre-push hook."))
     after_claude_removed(items)
     if not items:
         shutil.rmtree(BUNDLE, ignore_errors=True)
+
+
+def _oauth_callback_page(success, detail=""):
+    """Local browser page after OAuth redirect — layout/tokens match platform DESIGN.md (dark default)."""
+    # Status chip = platform Badge (pill 22px, soft + -text, optional svg — see shared/ui/badge.tsx / ErrorState).
+    if success:
+        status = "ok"
+        title = "You're signed in"
+        body = "Return to the terminal — you can close this tab."
+        hint = "This window can be closed."
+        badge_label = "Signed in"
+        icon = (
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<path d="M20 6 9 17l-5-5"/></svg>'
+        )
+    else:
+        status = "bad"
+        title = "Sign-in didn't complete"
+        body = html.escape(detail or "Something went wrong during sign-in.")
+        hint = "Close this tab and run xdlc login again in the terminal."
+        badge_label = "Failed"
+        icon = (
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>'
+        )
+    return f"""<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xora DLC</title>
+<style>
+  /* Xora Optimize tokens — dark default (platform/frontend/DESIGN.md §4) */
+  :root {{
+    color-scheme: dark;
+    --xora-bg: #1f1f23;
+    --xora-sidebar: #18181b;
+    --xora-text: #ececf0;
+    --xora-text-muted: #a1a4aa;
+    --xora-text-faint: #8f9298;
+    --xora-line: #34343b;
+    --xora-primary-text: #c1c9f6;
+    --xora-success-soft: #163323;
+    --xora-success-text: #7ddba3;
+    --xora-danger-soft: #3b1d1a;
+    --xora-danger-text: #ff9f96;
+    --xora-font-sans: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    --xora-radius-card: 14px;
+    --xora-radius-full: 999px;
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    padding: 40px 16px;
+    font: 400 14px / 1.55 var(--xora-font-sans);
+    background: var(--xora-sidebar);
+    color: var(--xora-text);
+    -webkit-font-smoothing: antialiased;
+  }}
+  main {{
+    width: min(420px, 100%);
+    border: 1px solid var(--xora-line);
+    border-radius: var(--xora-radius-card);
+    background: var(--xora-bg);
+    padding: 28px 24px 24px;
+    text-align: center;
+  }}
+  /* Wordmark stand-in for Logo on LoginPage — text-heading 16 / 700, primary-text */
+  .brand {{
+    margin: 0 0 16px;
+    font-size: 16px; font-weight: 700; line-height: 1.4;
+    color: var(--xora-primary-text);
+  }}
+  /* Badge: h-22, px-9, gap-1.5, text-micro 600, soft fill (no border) — above title like ErrorState */
+  .badge {{
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; height: 22px; padding: 0 9px; margin: 0 0 12px;
+    border: 0; border-radius: var(--xora-radius-full);
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+  }}
+  .badge svg {{ flex-shrink: 0; display: block; }}
+  main[data-status="ok"] .badge {{
+    background: var(--xora-success-soft); color: var(--xora-success-text);
+  }}
+  main[data-status="bad"] .badge {{
+    background: var(--xora-danger-soft); color: var(--xora-danger-text);
+  }}
+  /* text-title 22 + font-bold like ErrorState title */
+  h1 {{
+    margin: 0 0 8px;
+    font-size: 22px; font-weight: 700; line-height: 1.3;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }}
+  .body {{ margin: 0; color: var(--xora-text-muted); font-size: 14px; }}
+  .hint {{ margin: 20px 0 0; color: var(--xora-text-faint); font-size: 12px; font-weight: 500; }}
+</style>
+</head>
+<body>
+  <main data-status="{status}" role="status">
+    <p class="brand">Xora DLC</p>
+    <span class="badge">{icon}{html.escape(badge_label)}</span>
+    <h1>{html.escape(title)}</h1>
+    <p class="body">{body}</p>
+    <p class="hint">{html.escape(hint)}</p>
+  </main>
+</body>
+</html>
+""".encode()
 
 
 class _Callback(http.server.BaseHTTPRequestHandler):
@@ -1172,10 +1349,9 @@ class _Callback(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         _Callback.result.update({k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()})
-        ok = "code" in _Callback.result
-        page = ("<h2>Signed in to Xora DLC</h2><p>Return to the terminal.</p>" if ok else
-                f"<h2>Sign-in failed</h2><p>{_Callback.result.get('error', '')}</p>")
-        data = f"<!doctype html><meta charset=utf-8><body style='font-family:sans-serif'>{page}".encode()
+        success = "code" in _Callback.result
+        detail = _Callback.result.get("error_description") or _Callback.result.get("error") or ""
+        data = _oauth_callback_page(success, detail)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -1200,7 +1376,8 @@ def cmd_login(argv):
     url = meta["authorization_endpoint"] + "?" + urllib.parse.urlencode({
         "response_type": "code", "client_id": CLIENT_ID, "redirect_uri": redirect,
         "code_challenge": challenge, "code_challenge_method": "S256", "state": state})
-    print(f"Sign in to Xora DLC ({c['env']}: {base}). Open this page if the browser does not open:\n{url}", flush=True)
+    print(f"Sign in to {em('Xora DLC')} ({em(c['env'])}). "
+          f"Open this page if the browser does not open:\n{url}", flush=True)
     if not os.environ.get("XDLC_NO_BROWSER"):
         webbrowser.open(url)
     srv.timeout = 1
@@ -1222,10 +1399,12 @@ def cmd_login(argv):
         raise Abort(f"Token exchange failed: {out}")
     _store(c["env"], out)
     u, why = whoami()
-    print("Signed in: " + (account_line(u) if u else f"(could not read account: {why})"))
+    print(f"{ok('Signed in:')} " + (account_line(u) if u else f"(could not read account: {why})"))
     if u and not u.get("role"):
-        print("Account has no role: ask a Xora DLC admin to assign a role (e.g. DEV) before asking the agent.")
-    print("Wrong account? Sign out of Xora DLC in the browser, run xdlc logout, then xdlc login.")
+        print(warn("Account has no role:") + dim(f" ask a {em('Xora DLC')} admin to assign a role "
+                                                 f"(e.g. {em('DEV')}) before asking the agent."))
+    print(dim(f"Wrong account? Sign out of {em('Xora DLC')} in the browser, run {em('xdlc logout')}, "
+              f"then {em('xdlc login')}."))
 
 
 def cmd_logout(argv):
@@ -1233,34 +1412,41 @@ def cmd_logout(argv):
         raise Abort("logout takes no options.", 2)
     c = config()
     if not tokens(c["env"]):
-        print(f"Not logged in ({c['env']}).")
+        print(f"Not logged in ({em(c['env'])}).")
         return
     save_tokens(c["env"], None)
-    print(f"Logged out of Xora DLC ({c['env']}: {base_url(c)}). The agent needs xdlc login again.")
+    print(f"Logged out of {em('Xora DLC')} ({em(c['env'])}). "
+          + dim(f"The agent needs {em('xdlc login')} again."))
 
 
 def cmd_status(argv):
     if argv:
         raise Abort("status takes no options.", 2)
     c = config()
-    print(f"xdlc {VERSION} · plugin {bundle_version() or 'not downloaded'}")
-    print(f"Backend: {c['env']}  {base_url(c)}")
+    plugin = bundle_version() or dim("not downloaded")
+    print(f"{bold('xdlc')} {VERSION} · plugin {plugin}")
+    print()
+    print(f"{bold('Backend:')} {em(c['env'])}")
+    print()
     u, why = whoami()
     t = tokens(c["env"])
     exp = time.strftime("%H:%M %d/%m", time.localtime(t["expires_at"])) if t else ""
-    print("Account: " + (f"{account_line(u)} · token expires {exp} (auto-refresh)" if u else why))
-    items = installs()
-    print("Setups:" + ("" if items else " none (run xdlc setup)"))
-    for i, r in enumerate(items, 1):
-        print(f"  {i}) {label(r)}   v{r.get('version') or '?'}")
+    print(f"{bold('Account:')} " + (f"{account_line(u)} · token expires {exp} (auto-refresh)" if u else why))
     root = git_root(Path.cwd())
     if root:
+        print()
         branch = git_out(root, "branch", "--show-current")
         repo_id, _ = repo_identity(root)
         cur = link_of(repo_id, branch) if branch else None
-        print(f"Current repo: {repo_id} · branch {branch or '(detached HEAD)'} → "
-              + (step_label(cur) if cur else "no work order mapped (xdlc link)"))
-        print("pre-push hook: " + ("installed" if pre_push_of(root) else "not installed (xdlc link will install)"))
+        mapped = step_label(cur) if cur else dim("no work order mapped (xdlc link)")
+        print(f"{bold('Current repo:')} {em(repo_id)} · branch {em(branch or '(detached HEAD)')} → {mapped}")
+        hook = ok("installed") if pre_push_of(root) else dim("not installed (xdlc link will install)")
+        print(f"{bold('pre-push hook:')} {hook}")
+    print()
+    items = installs()
+    print(f"{bold('Setups:')}" + ("" if items else dim(" none (run xdlc setup)")))
+    for i, r in enumerate(items, 1):
+        print(f"  {i}. {label(r)}   v{r.get('version') or '?'}")
 
 
 def cmd_use(argv):

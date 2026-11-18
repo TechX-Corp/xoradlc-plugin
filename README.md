@@ -4,14 +4,14 @@ This repository ships **Xora DLC** integration for coding agents (`xdlc` + role/
 
 | Path | What it is |
 |---|---|
-| `xdlc` | CLI: login, setup/remove, MCP proxy (`xora-dlc` / `xora_ask`), link, sensor, update |
+| `xdlc` / `cmd/xdlc` | Go CLI binary: login, setup/remove, MCP proxy (`xora-dlc` / `xora_ask`), link, sensor, update |
 | `roles/catalog.yaml` | Enable/disable role packs + map `whoami.role` → pack id |
 | `roles/<id>/AGENTS.md` | Per-role instructions (installable only if `enabled: true`) |
 | `host-agents/<host>/manifest.yaml` | Host setup/remove contract (MCP paths, GUIDANCE dest, skills dir, hooks) |
 | `standards/GUIDANCE.md` | Shared MCP routing guidance |
-| `standards/hooks/` | Hook templates (e.g. Claude SessionStart) |
+| `host-agents/claude/hooks/` | Claude-only hook templates (SessionStart) |
 | `install.sh` / `install.ps1` | Per-OS installer for the `xdlc` binary |
-| `test_roles.py` | Stdlib self-check (no network) |
+| `scripts/smoke_xdlc.py` | Stdlib smoke test against the built binary (fake local backend only) |
 | `aidlc-plugin/` | Separate AI-DLC plugin `techx-dlc` — **not** used by `xdlc` |
 
 User-facing install and usage: **[GUIDE.md](GUIDE.md)**.
@@ -27,14 +27,16 @@ User-facing install and usage: **[GUIDE.md](GUIDE.md)**.
 ## Checks
 
 ```bash
-python3 test_roles.py
+go test ./...
+go build -o xdlc ./cmd/xdlc   # Windows: -o xdlc.exe
+python3 scripts/smoke_xdlc.py
 ```
 
-CI (`.github/workflows/xdlc-plugin-tests.yml`) runs the same script on Ubuntu, macOS, and Windows (Python 3.9 / 3.13). The Commands fence in `GUIDE.md` must match `xdlc` help output exactly. `install.ps1` must stay ASCII-only.
+CI (`.github/workflows/xdlc-plugin-tests.yml`) runs `go test`, builds `xdlc`, and runs the smoke script on Ubuntu, macOS, and Windows (Go 1.22; Python 3.12 for smoke only). The Commands fence in `GUIDE.md` must match `xdlc` help output exactly. `install.ps1` must stay ASCII-only.
 
 ## Release
 
-1. Bump `VERSION` in `xdlc` when ready.
+1. Bump `VERSION` in `internal/config/config.go` when ready.
 2. Merge to `main`, tag `vX.Y.Z` when cutting a release (`install.sh` / `install.ps1` / `xdlc update` prefer the latest tag).
 
 Dev overrides: `XDLC_REF=<branch>`, `XDLC_PLUGIN_DIR=<clone>`, `XDLC_API_URL` (tests only).

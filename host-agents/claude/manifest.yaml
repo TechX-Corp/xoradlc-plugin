@@ -19,7 +19,8 @@ standards:
   - source: GUIDANCE.md
     dest: .claude/xora-dlc/GUIDANCE.md
 hooks:
-  - source: standards/hooks/claude-session-start.json
+  # Relative to this host pack (host-agents/claude/)
+  - source: hooks/session-start.json
     merge_into_local: .claude/settings.local.json
     merge_into_global: .claude/settings.json
 setup:

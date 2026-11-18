@@ -10,6 +10,9 @@ node_modules/
 dist/
 *.tgz
 coverage/
+/xdlc
+/xdlc.exe
+*.exe
 
 # Local config and secrets
 .env

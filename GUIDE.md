@@ -7,7 +7,6 @@ Use Xora DLC from **Kiro CLI** or **Claude Code** with the `xdlc` command: ask a
 | | Requirement |
 |---|---|
 | OS | macOS, Linux, Windows 10/11 (or WSL) |
-| Python | 3.9+ (`python3` on macOS / Linux; `py` or `python` on Windows) |
 | git | Any supported version |
 | Agent | **Kiro CLI** (`kiro-cli`) or **Claude Code** (`claude`) |
 | Account | Xora DLC account (SSO or local) with a role enabled in this plugin (e.g. DEV) |
@@ -117,10 +116,8 @@ For details on one command: xdlc <command> --help
 |---|---|
 | macOS / Linux: `xdlc: command not found` | Add `~/.local/bin` to `PATH`, then open a new terminal |
 | Windows: `'xdlc' is not recognized` | Open a new terminal; check user `PATH` includes `%LOCALAPPDATA%\Programs\xdlc` |
-| `python3 required` / needs Python 3.9+ | Install Python 3.9+, open a new terminal, run install again |
-| Windows Store Python stub | Install real Python, or turn off App execution aliases for `python.exe` |
 | PowerShell blocks the script | Use the install command above (`-ExecutionPolicy ByPass`) |
-| `could not download xdlc` | Check access to `raw.githubusercontent.com` |
+| `could not download xdlc` / no release yet | Need a GitHub Release (`vX.Y.Z`) with a binary for your OS; check access to `github.com` |
 | Menu does not move with ↑/↓ | Use Windows Terminal, or select by number (see [Notes](#notes)) |
 
 ## Notes

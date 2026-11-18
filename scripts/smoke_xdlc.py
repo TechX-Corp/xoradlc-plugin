@@ -1,17 +1,19 @@
-"""Self-check for the role plugins: python3 test_roles.py (stdlib only, no network)."""
+"""Smoke xdlc like a user on macOS / Linux / Windows: python3 scripts/smoke_xdlc.py (stdlib only).
+Uses the built Go binary at repo root; no network except a fake local OAuth/MCP backend."""
 import json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 ROLES = ["dev"]
 WIN = os.name == "nt"
+REPO_BIN = ROOT / ("xdlc.exe" if WIN else "xdlc")
 
 
 def main():
     # Pack layout: roles / host-agents / standards
     assert (ROOT / "roles" / "catalog.yaml").is_file()
     assert (ROOT / "standards" / "GUIDANCE.md").is_file()
-    assert (ROOT / "standards" / "hooks" / "claude-session-start.json").is_file()
+    assert (ROOT / "host-agents" / "claude" / "hooks" / "session-start.json").is_file()
     for host in ("kiro", "claude"):
         assert (ROOT / "host-agents" / host / "manifest.yaml").is_file(), host
     for role in ROLES:
@@ -37,18 +39,30 @@ def check_sensor():
     assert "xora-dlc" in agents
 
 
+def _catalog_roles(path):
+    """Minimal YAML parse for roles/*/enabled (stdlib only)."""
+    roles, cur = [], {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if s.startswith("- id:"):
+            if cur:
+                roles.append(cur)
+            cur = {"id": s.split(":", 1)[1].strip()}
+        elif s.startswith("enabled:") and cur:
+            cur["enabled"] = s.split(":", 1)[1].strip() == "true"
+    if cur:
+        roles.append(cur)
+    return roles
+
+
 def check_pack():
     """catalog.yaml maps whoami; manifests name MCP xora-dlc; GUIDANCE in standards."""
-    import importlib.machinery
-    loader = importlib.machinery.SourceFileLoader("xdlc_mod", str(ROOT / "xdlc"))
-    mod = loader.load_module()
-    en = mod.load_yaml(ROOT / "roles" / "catalog.yaml")
-    assert any(r.get("id") == "dev" and r.get("enabled") for r in en["roles"])
-    assert any(r.get("id") == "ba" and not r.get("enabled") for r in en["roles"])
-    kiro = mod.load_yaml(ROOT / "host-agents" / "kiro" / "manifest.yaml")
-    assert kiro["mcp"]["name"] == "xora-dlc"
-    claude = mod.load_yaml(ROOT / "host-agents" / "claude" / "manifest.yaml")
-    assert claude["mcp"]["name"] == "xora-dlc"
+    roles = _catalog_roles(ROOT / "roles" / "catalog.yaml")
+    assert any(r.get("id") == "dev" and r.get("enabled") for r in roles)
+    assert any(r.get("id") == "ba" and not r.get("enabled") for r in roles)
+    for host in ("kiro", "claude"):
+        text = (ROOT / "host-agents" / host / "manifest.yaml").read_text(encoding="utf-8")
+        assert re.search(r"(?m)^\s*name:\s*xora-dlc\s*$", text), host
     routing = (ROOT / "standards" / "GUIDANCE.md").read_text(encoding="utf-8")
     assert "xora-dlc" in routing and "xora_ask" in routing
 
@@ -59,8 +73,10 @@ def check_xdlc():
     status, version, uninstall. HOME tạm, không ra mạng."""
     import http.server, threading, base64, hashlib, urllib.parse, urllib.request
     repo = ROOT
-    cli = repo / "xdlc"
-    version = re.search(r'^VERSION = "([^"]+)"', cli.read_text(encoding="utf-8"), re.M).group(1)
+    assert REPO_BIN.is_file(), f"build first: go build -o {REPO_BIN.name} ./cmd/xdlc"
+    version = strip_ansi(subprocess.run(
+        [str(REPO_BIN), "--version"], capture_output=True, text=True, encoding="utf-8", check=True,
+    ).stdout).strip().split()[-1]
     ps1 = (repo / "install.ps1").read_bytes()
     assert ps1.isascii(), "install.ps1 phải chỉ có ký tự ASCII (PowerShell 5.1 đọc .ps1 không BOM theo ANSI)"
 
@@ -138,22 +154,21 @@ def check_xdlc():
             "HOME": str(home), "USERPROFILE": str(home), "XDLC_PLUGIN_DIR": str(repo), "XDLC_NO_BROWSER": "1",
             "XDLC_BIN_DIR": str(home / "bin"), "XDLC_NO_PATH": "1",
             "XDLC_API_URL": f"http://127.0.0.1:{srv.server_port}"}
-        xdlc = home / "bin" / ("xdlc.py" if WIN else "xdlc")
+        xdlc = home / "bin" / ("xdlc.exe" if WIN else "xdlc")
 
         def x(*args, cwd=None, inp="", ok=True):
-            r = subprocess.run([sys.executable, str(xdlc), *args], cwd=cwd or home, env=env, input=inp,
+            r = subprocess.run([str(xdlc), *args], cwd=cwd or home, env=env, input=inp,
                                capture_output=True, text=True, encoding="utf-8", timeout=60)
             assert (r.returncode == 0) == ok, (args, r.returncode, r.stdout, r.stderr)
-            return r.stdout + r.stderr
+            return strip_ansi(r.stdout + r.stderr)
 
         if WIN:  # install.ps1 (powershell -File), không sửa PATH thật
             r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(repo / "install.ps1")],
                                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
             assert r.returncode == 0 and f"xdlc {version}" in r.stdout, r.stdout + r.stderr
-            shim = (home / "bin" / "xdlc.cmd").read_text(encoding="utf-8")
-            assert shim.startswith("@echo off") and '"%~dp0xdlc.py" %*' in shim, shim
-            assert f"xdlc {version}" in subprocess.run([str(home / "bin" / "xdlc.cmd"), "--version"], env=env,
-                                                       capture_output=True, text=True, encoding="utf-8").stdout
+            assert f"xdlc {version}" in strip_ansi(subprocess.run(
+                [str(xdlc), "--version"], env=env, capture_output=True, text=True, encoding="utf-8",
+            ).stdout)
         else:
             out = subprocess.run(["sh", str(repo / "install.sh")], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True).stdout
             assert os.access(xdlc, os.X_OK) and f"xdlc {version}" in out, out
@@ -166,7 +181,7 @@ def check_xdlc():
 
         # login first (setup requires logged-in enabled role)
         assert "login" in x("setup", "--agent", "kiro", "--scope", "local", cwd=home, ok=False).lower()
-        lp = subprocess.Popen([sys.executable, str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        lp = subprocess.Popen([str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True, encoding="utf-8")
         url = next(l for l in lp.stdout if l.startswith("http"))
         urllib.request.urlopen(url.strip(), timeout=10).read()
@@ -188,10 +203,8 @@ def check_xdlc():
         servers = json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         entry = servers["xora-dlc"]
         assert servers["postgres"] == {"command": "pg"} and entry["args"][-1] == "mcp"
-        if WIN:  # Windows không chạy thẳng file .py: py -3 / python <xdlc.py> mcp
-            assert Path(entry["command"]).name.lower() in ("py.exe", "python.exe") and entry["args"][-2] == str(xdlc), entry
-        else:
-            assert entry == {"command": str(xdlc), "args": ["mcp"], "disabled": False, "autoApprove": []}, entry
+        assert Path(entry["command"]).resolve() == xdlc.resolve() and entry["args"] == ["mcp"] and not entry.get("disabled")
+        assert entry.get("autoApprove") == []
         # agent chạy đúng lệnh trong mcp.json: initialize trả lời được (chưa đăng nhập vẫn trả lời cục bộ)
         r = subprocess.run([entry["command"], *entry["args"]], env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
                            input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n")
@@ -201,7 +214,8 @@ def check_xdlc():
         assert not (home / ".xdlc" / "plugin" / "roles" / "dev" / "sensor" / "convention_sensor.py").is_file()
         assert "Reinstalled" in x("setup", "--agent=kiro", "--scope=local", cwd=ws)
         assert "Reinstalled" in x("setup", "-a", "kiro", "-s", "local", cwd=ws)  # tuỳ chọn ngắn
-        assert "-a, --agent" in x("setup", "-a", "kiro", "-x", "y", cwd=ws, ok=False)
+        assert "-a, --agent" in x("setup", "--help")
+        assert "unexpected" in x("setup", "-a", "kiro", "-x", "y", cwd=ws, ok=False).lower()
         assert len(json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"]) == 1, "setup lại không tạo mục trùng"
 
         g = lambda repo, *a: subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *a],
@@ -284,10 +298,11 @@ def check_xdlc():
 
 
 def check_claude_bundle(home, xdlc):
-    """host-agents/claude + standards hook; marketplace removed."""
+    """host-agents/claude hooks + manifest; marketplace removed."""
     man = (ROOT / "host-agents" / "claude" / "manifest.yaml").read_text(encoding="utf-8")
     assert "xora-dlc" in man and "config_path_local" in man
-    hook = json.loads((ROOT / "standards" / "hooks" / "claude-session-start.json").read_text(encoding="utf-8"))
+    assert "hooks/session-start.json" in man
+    hook = json.loads((ROOT / "host-agents" / "claude" / "hooks" / "session-start.json").read_text(encoding="utf-8"))
     assert "SessionStart" in hook["hooks"]
 
 
@@ -302,7 +317,7 @@ def pty_run(argv, steps, cwd, env, timeout=60):
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(cwd)
-        os.execve(sys.executable, [sys.executable, *argv], env)
+        os.execve(argv[0], argv, env)
     import fcntl, struct, termios
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))  # terminal 160 cột
     out, pos, sent, deadline = b"", 0, 0, time.time() + timeout
@@ -315,8 +330,9 @@ def pty_run(argv, steps, cwd, env, timeout=60):
             if not chunk:
                 break
             out += chunk
-        while sent < len(steps) and (i := out.find(steps[sent][0].encode(), pos)) >= 0:
-            pos = i + len(steps[sent][0].encode())
+        plain = strip_ansi(out.decode(errors="replace"))
+        while sent < len(steps) and (i := plain.find(steps[sent][0], pos)) >= 0:
+            pos = i + len(steps[sent][0])
             os.write(fd, steps[sent][1].encode())
             sent += 1
     else:
@@ -328,6 +344,7 @@ def pty_run(argv, steps, cwd, env, timeout=60):
 
 def check_menu():
     """Menu phím mũi tên: login + setup Local; remove multi-select. pty: macOS/Linux only."""
+    assert REPO_BIN.is_file(), f"build first: go build -o {REPO_BIN.name} ./cmd/xdlc"
     if WIN:
         return
     import http.server, threading, base64, hashlib, urllib.parse, urllib.request
@@ -368,34 +385,38 @@ def check_menu():
 
     srv = http.server.HTTPServer(("127.0.0.1", 0), Backend)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    cli = str(ROOT / "xdlc")
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp) / "home"; home.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("XDLC_", "XORA_"))} | {
             "HOME": str(home), "XDLC_PLUGIN_DIR": str(ROOT), "TERM": "xterm-256color",
             "XDLC_BIN_DIR": str(home / "bin"), "XDLC_NO_BROWSER": "1",
             "XDLC_API_URL": f"http://127.0.0.1:{srv.server_port}"}
-        # install binary
         subprocess.run(["sh", str(ROOT / "install.sh")], env=env, capture_output=True, text=True, check=True)
         xdlc = home / "bin" / "xdlc"
-        lp = subprocess.Popen([sys.executable, str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        lp = subprocess.Popen([str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         url = next(l for l in lp.stdout if l.startswith("http"))
         urllib.request.urlopen(url.strip(), timeout=10).read()
         assert lp.wait(timeout=30) == 0
         down, enter = "\x1b[B", "\r"
         for name in ("a", "b"):
             (Path(tmp) / name).mkdir()
-            code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter", down + enter)], Path(tmp) / name, env)
+            code, out = pty_run([str(xdlc), "setup", "--agent", "kiro"], [("Enter", down + enter)], Path(tmp) / name, env)
             plain = strip_ansi(out)
             assert code == 0 and "Local" in plain and "Installed" in plain, out
             assert (Path(tmp) / name / ".kiro" / "steering" / "xora-dlc.md").is_file()
-        code, out = pty_run([cli, "remove"], [("confirm", "\x1b")], Path(tmp) / "a", env)
+        code, out = pty_run([str(xdlc), "remove"], [("current directory", "q")], Path(tmp) / "a", env)
         assert code == 0 and "Cancelled" in strip_ansi(out) and (Path(tmp) / "a" / ".kiro").is_dir(), out
-        code, out = pty_run([cli, "remove"], [("confirm", enter), ("Nothing selected", " " + down + " " + enter),
+        code, out = pty_run([str(xdlc), "remove"], [("current directory", enter), ("Nothing selected", "a" + enter),
                                                ("Continue?", down + enter)], Path(tmp) / "a", env)
         assert code == 0 and strip_ansi(out).count("Removed") == 2, out
-        assert not (Path(tmp) / "a" / ".kiro").exists() and not (Path(tmp) / "b" / ".kiro").exists()
-        assert json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"] == []
+        for name in ("a", "b"):
+            kiro = Path(tmp) / name / ".kiro"
+            assert not (kiro / "steering" / "xora-dlc.md").exists(), kiro
+            assert not (kiro / "skills" / "implement").exists(), kiro
+        installs_path = home / ".xdlc" / "installs.json"
+        if installs_path.is_file():
+            installs = json.loads(installs_path.read_text(encoding="utf-8")).get("installs") or []
+            assert installs == [], installs
     srv.shutdown()
 
 

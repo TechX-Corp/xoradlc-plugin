@@ -1173,6 +1173,10 @@ def cmd_setup(argv):
             any(r["agent"] == agent and r["scope"] == "local" and r["path"] == str(cwd) for r in items):
         print(warn("Note:") + dim(f" both Global and Local exist for this project; "
                                   f"{em('Local')} is used, Global is redundant here."))
+    print(warn("Warning:") + dim(
+        f" setup adds agent instructions that prefer MCP {em('xora-dev')} / {em('xora_ask')} for Xora DLC "
+        f"(shared context, work orders, KB). Other plugins may still win if their routing is stronger "
+        f"or the Developer overrides. Open a new agent session after setup."))
     tip = "open a new Kiro session" if agent == "kiro" else "open a new Claude Code session (accept the xora-dev MCP server if asked)"
     print()
     print(dim(f"Next: {tip}." + ("" if tokens() else f" Not logged in: run {em('xdlc login')}.")))

@@ -164,9 +164,11 @@ def check_xdlc():
         (ws / ".kiro" / "skills" / "deploy-guide").mkdir(parents=True)
         (ws / ".kiro" / "skills" / "deploy-guide" / "SKILL.md").write_text("team", encoding="utf-8")
         assert "global or local" in x("setup", "--agent", "kiro", "--scope", "project", cwd=ws, ok=False)
-        assert "Installed" in x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
+        out = x("setup", "--agent", "kiro", "--scope", "local", cwd=ws)
+        assert "Installed" in out and "Warning:" in out and "xora-dev" in out, out
         kiro = ws / ".kiro"
         assert (kiro / "skills" / "implement" / "SKILL.md").is_file() and (kiro / "steering" / "xora-dev.md").is_file()
+        assert (kiro / "steering" / "xora-dlc-mcp-routing.md").is_file()
         assert not (kiro / "hooks" / "xora-dev-convention-sensor.json").is_file()
         servers = json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         entry = servers["xora-dev"]
@@ -300,7 +302,8 @@ def check_claude_bundle(home, xdlc):
         assert mcp["args"][-1] == "mcp", mcp
         cmds = [h["command"] for g in json.loads((bundle / "dev" / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"].values()
                 for e in g for h in e["hooks"]]
-        assert any(" _print " in c and "${CLAUDE_PLUGIN_ROOT}/AGENTS.md" in c for c in cmds), cmds
+        assert any(" _print " in c and "${CLAUDE_PLUGIN_ROOT}/AGENTS.md" in c
+                   and "xora-dlc-mcp-routing.md" in c for c in cmds), cmds
         assert not any("convention_sensor" in c or "sensor --hook" in c for c in cmds), cmds
         assert not any(c.startswith(("cat ", "python3 ")) for c in cmds), cmds
 

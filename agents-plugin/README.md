@@ -19,6 +19,8 @@ The `xora-dev` plugin brings Xora DLC into the coding agent you already use (Kir
 
 ## Install
 
+**Warning — agent routing:** `xdlc setup` installs instruction files (including a short MCP routing guide) so the agent prefers MCP server `xora-dev` / tool `xora_ask` for Xora DLC intents (shared/work context, work orders, BRD/design, KB convention). If you already use other plugins with similar prompts, the agent can still follow *their* rules when those are stronger or the Developer overrides — expect some overlap. Open a **new** agent session after setup.
+
 **macOS / Linux / WSL:**
 
 ```bash

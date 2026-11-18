@@ -89,7 +89,7 @@ xdlc link
 Run `xdlc` to see this list:
 
 ```text
-xdlc 0.2.0: Xora DLC for Claude Code and Kiro CLI
+xdlc 0.2.1: Xora DLC for Claude Code and Kiro CLI
 
 Usage: xdlc <command> [options]
 

@@ -28,7 +28,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 REPO = "TechX-Corp/xoradlc-plugin"
 PROD_URL = "https://xoradlc-platform-api.techxcorp.com"
 LOCAL_URL = "http://localhost:8000"
@@ -297,7 +297,7 @@ class _Raw:
 
 def menu(title, labels, multi=False):
     """↑/↓ move, Enter select; multi: Space mark, a = all. Esc / q cancel. → selected indices.
-    Single: ◉/○ radio; multi: > focus + □/■. Focused label is cyan."""
+    Single: ◉/○ radio; multi: > focus + □/▣. Focused label is cyan."""
     fd, n = sys.stdin.fileno(), len(labels)
     cols = shutil.get_terminal_size((80, 24)).columns
     width = cols - 1 if cols >= 40 else 10_000  # unknown width: do not truncate lines
@@ -311,7 +311,7 @@ def menu(title, labels, multi=False):
             out.write(f"\x1b[{n + 1}A")
         for i, text in enumerate(labels):
             if multi:
-                box = "■ " if i in marked else "□ "
+                box = "▣ " if i in marked else "□ "
                 prefix = f"{'>' if i == cur else ' '} {box}"
             else:
                 prefix = "◉ " if i == cur else "○ "

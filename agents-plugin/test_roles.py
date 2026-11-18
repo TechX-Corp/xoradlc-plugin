@@ -394,13 +394,14 @@ def check_menu():
         down, enter = "\x1b[B", "\r"
         for name in ("a", "b"):
             (Path(tmp) / name).mkdir()
-            code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter select", down + enter)], Path(tmp) / name, env)
+            # Tip paints keys with ANSI ("Enter" + dim " select"), so wait on the key token only.
+            code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter", down + enter)], Path(tmp) / name, env)
             plain = strip_ansi(out)
             assert code == 0 and "› Local" in plain and "Installed" in plain, out
             assert (Path(tmp) / name / ".kiro" / "skills" / "implement" / "SKILL.md").is_file()
-        code, out = pty_run([cli, "remove"], [("Enter confirm", "\x1b")], Path(tmp) / "a", env)
+        code, out = pty_run([cli, "remove"], [("confirm", "\x1b")], Path(tmp) / "a", env)
         assert code == 0 and "Cancelled" in strip_ansi(out) and (Path(tmp) / "a" / ".kiro").is_dir(), out
-        code, out = pty_run([cli, "remove"], [("Enter confirm", enter), ("Nothing selected", " " + down + " " + enter),
+        code, out = pty_run([cli, "remove"], [("confirm", enter), ("Nothing selected", " " + down + " " + enter),
                                                ("Continue?", down + enter)], Path(tmp) / "a", env)
         assert code == 0 and strip_ansi(out).count("Removed") == 2, out
         assert not (Path(tmp) / "a" / ".kiro").exists() and not (Path(tmp) / "b" / ".kiro").exists()

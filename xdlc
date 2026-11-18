@@ -105,7 +105,8 @@ CMD_HELP = {
     "use": "xdlc use [prod|local] [-u, --url URL]\n\nNo args: print current backend. prod = deployed, local = backend on this machine\n"
            "(default http://localhost:8000; --url changes and remembers it). Tokens are separate per backend.\n"
            "After switching, open a new agent session (or reconnect in /mcp).",
-    "update": "xdlc update\n\nDownloads the latest release (git tag vX.Y.Z), replaces xdlc and the plugin, then reinstalls into every setup.",
+    "update": "xdlc update\n\nDownloads the latest release (git tag vX.Y.Z), replaces xdlc and the plugin, then reinstalls into every setup.\n"
+              "If there is no release tag yet, falls back to the tip of main (temporary).",
     "--version": "xdlc --version (or -v)\n\nPrints xdlc version, installed plugin version, and the latest release if available.",
     "uninstall": "xdlc uninstall\n\nRemoves every setup, logs out, deletes ~/.xdlc and the xdlc command itself. Asks for confirmation first.",
 }
@@ -237,6 +238,43 @@ def warn(text):
     return _paint(text, 33)
 
 
+def print_help(text, file=None):
+    """Paint help blocks like other TUI: bold sections, accent names, dim trailing tips."""
+    out = file or sys.stdout
+
+    def put(s=""):
+        print(s, file=out)
+
+    lines = text.rstrip().splitlines()
+    for i, line in enumerate(lines):
+        if not line:
+            put()
+            continue
+        if i == 0 and line.startswith("xdlc "):
+            body = line[5:]
+            for name in ("Xora DLC", "Claude Code", "Kiro CLI", "xora-dev"):
+                body = body.replace(name, em(name))
+            put(f"{bold('xdlc')} {body}")
+            continue
+        if line in ("Commands:", "Options:", "Shortcuts (skip terminal prompts):"):
+            put(bold(line))
+            continue
+        if line.startswith("Usage:"):
+            put(f"{bold('Usage:')}{line[6:]}")
+            continue
+        if line.startswith("Scope:"):
+            put(f"{bold('Scope:')}{dim(line[6:])}")
+            continue
+        if line.startswith("For details"):
+            put(dim(line))
+            continue
+        m = re.match(r"^(  )(\S.*?\S|\S)( {2,})(.+)$", line)
+        if m:
+            put(f"{m.group(1)}{em(m.group(2))}{m.group(3)}{m.group(4)}")
+            continue
+        put(line)
+
+
 def arrow_keys():
     """Arrow-key menus when stdin/stdout are a real terminal; otherwise (pipe, CI, ANSI-unaware console,
     XDLC_PLAIN=1) type numbers."""
@@ -295,14 +333,35 @@ class _Raw:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
 
 
+def _tip_action(key, gloss):
+    """Menu footer: accent the key, dim the gloss (e.g. Enter + select)."""
+    return f"{em(key)}{dim(' ' + gloss)}"
+
+
+def menu_tips(multi=False):
+    sep = dim(" · ")
+    if multi:
+        return sep.join((
+            _tip_action("↑/↓", "move"),
+            _tip_action("Space", "select"),
+            _tip_action("a", "select all"),
+            _tip_action("Enter", "confirm"),
+            _tip_action("Esc", "cancel"),
+        ))
+    return sep.join((
+        _tip_action("↑/↓", "move"),
+        _tip_action("Enter", "select"),
+        _tip_action("Esc", "cancel"),
+    ))
+
+
 def menu(title, labels, multi=False):
     """↑/↓ move, Enter select; multi: Space mark, a = all. Esc / q cancel. → selected indices.
     Single: ◉/○ radio; multi: > focus + □/▣. Focused label is cyan."""
     fd, n = sys.stdin.fileno(), len(labels)
     cols = shutil.get_terminal_size((80, 24)).columns
     width = cols - 1 if cols >= 40 else 10_000  # unknown width: do not truncate lines
-    tips = ("↑/↓ move · Space select · a select all · Enter confirm · Esc cancel" if multi
-            else "↑/↓ move · Enter select · Esc cancel")
+    tips = menu_tips(multi)
     cur, marked, hint, result = 0, set(), None, None
     out = sys.stdout
 
@@ -321,10 +380,7 @@ def menu(title, labels, multi=False):
             if i == cur:
                 line = focus(line)  # radio / arrow+checkbox + label
             out.write("\r\x1b[2K" + line + "\n")
-        tip = hint or tips
-        if len(tip) > width:
-            tip = tip[:width]
-        out.write("\r\x1b[2K" + dim(tip) + "\n")
+        out.write("\r\x1b[2K" + (hint or tips) + "\n")
         out.flush()
 
     print(title)
@@ -348,7 +404,8 @@ def menu(title, labels, multi=False):
                 elif marked:
                     result = sorted(marked)
                 else:
-                    hint = "Nothing selected: Space to select, Esc to cancel"
+                    hint = (dim("Nothing selected: ") + em("Space") + dim(" to select, ")
+                            + em("Esc") + dim(" to cancel"))
             elif k == "esc":
                 raise Abort("Cancelled.", 0)
             if result is None:
@@ -1089,12 +1146,12 @@ def remove_claude(rec, interactive):
     if rec["scope"] == "local" and Path(rec["path"]).is_dir():
         set_exclude(rec["path"], [])
     if not shutil.which("claude"):
-        print("  Command 'claude' not found: skipping uninstall in Claude Code.")
+        print(dim("  Command 'claude' not found: skipping uninstall in Claude Code."))
         return
     r = run(["claude", "plugin", "uninstall", PLUGIN, "--scope", CLAUDE_SCOPE[rec["scope"]]],
             cwd=rec["path"] if Path(rec["path"]).is_dir() else None, check=False)
     if r.returncode != 0:
-        print(f"  claude plugin uninstall: {(r.stderr or r.stdout).strip()}")
+        print(warn("  claude plugin uninstall:") + dim(f" {(r.stderr or r.stdout).strip()}"))
 
 
 SETUP = {"kiro": setup_kiro, "claude": setup_claude}
@@ -1161,6 +1218,7 @@ def cmd_setup(argv):
     items = [r for r in items if not same(r, rec)] + [rec]
     save_installs(items)
     verb = "Reinstalled" if old else "Installed"
+    print()
     print(f"{ok(verb)} {em('xora-dev')} for {em(AGENTS[agent])}: {label(rec).strip()}")
     if any(r["agent"] == agent and r["scope"] == "global" for r in items) and \
             any(r["agent"] == agent and r["scope"] == "local" and r["path"] == str(cwd) for r in items):
@@ -1174,6 +1232,7 @@ def cmd_setup(argv):
         print(dim(f"To send convention alerts to {em('Xora DLC')} on push: in each repo "
                   f"(without Local setup) run {em('xdlc link')}."))
     tip = "open a new Kiro session" if agent == "kiro" else "open a new Claude Code session (accept the xora-dev MCP server if asked)"
+    print()
     print(dim(f"Next: {tip}." + ("" if tokens() else f" Not logged in: run {em('xdlc login')}.")))
 
 
@@ -1200,13 +1259,15 @@ def cmd_remove(argv):
             while (idx := pick_many(len(cands), ask("> "))) is None:
                 print("Enter numbers, a range, or all.")
         chosen = [cands[i] for i in idx]
-        print("Will remove:")
+        print()
+        print(f"{bold('Will remove:')}")
         for r in chosen:
-            what = (f"{len(r.get('files', {}))} file(s) under .kiro/, {SERVER} block in {r['mcp_json']}"
-                    if r["agent"] == "kiro" else f"plugin {SERVER} (scope {CLAUDE_SCOPE[r['scope']]})")
+            what = (f"{len(r.get('files', {}))} file(s) under .kiro/, {em(SERVER)} block in {r['mcp_json']}"
+                    if r["agent"] == "kiro" else f"plugin {em(SERVER)} (scope {em(CLAUDE_SCOPE[r['scope']])})")
             print(f"  - {label(r).strip()}: {what}")
         if not confirm("Continue?"):
             raise Abort("Cancelled.", 0)
+    print()
     for r in chosen:
         REMOVE[r["agent"]](r, True)
         items = [x for x in items if not same(x, r)]
@@ -1426,7 +1487,10 @@ def cmd_status(argv):
     plugin = bundle_version() or dim("not downloaded")
     print(f"{bold('xdlc')} {VERSION} · plugin {plugin}")
     print()
-    print(f"{bold('Backend:')} {em(c['env'])}")
+    if c["env"] == "local":
+        print(f"{bold('Backend:')} {em(c['env'])}  {dim(base_url(c))}")
+    else:
+        print(f"{bold('Backend:')} {em(c['env'])}")
     print()
     u, why = whoami()
     t = tokens(c["env"])
@@ -1452,9 +1516,16 @@ def cmd_status(argv):
 def cmd_use(argv):
     argv = long_opts(argv)
     c = config()
+
+    def using_line(cfg):
+        if cfg["env"] == "local":
+            return f"{bold('Using:')} {em(cfg['env'])}  {dim(base_url(cfg))}"
+        return f"{bold('Using:')} {em(cfg['env'])}"
+
     if not argv:
-        print(f"Using: {c['env']}  {base_url(c)}")
-        print("Switch: xdlc use prod | xdlc use local [-u, --url URL]")
+        print(using_line(c))
+        print(dim("Switch: ") + em("xdlc use prod") + dim(" | ") + em("xdlc use local")
+              + dim(" [") + em("-u") + dim(", ") + em("--url URL") + dim("]"))
         return
     env, rest = argv[0], argv[1:]
     if env not in ("prod", "local"):
@@ -1466,11 +1537,12 @@ def cmd_use(argv):
     changed = env != c["env"] or bool(rest)
     c["env"] = env
     save_json(XDLC / "config.json", c)
-    print(f"Using: {env}  {base_url(c)}")
+    print(using_line(c))
     if not tokens(env):
-        print("Not logged in to this backend: run xdlc login.")
+        print(dim("Not logged in to this backend: run ") + em("xdlc login") + dim("."))
     if changed:
-        print("Open a new agent session (or reconnect xora-dev in /mcp) so the agent uses the new backend.")
+        print(dim("Open a new agent session (or reconnect ") + em("xora-dev")
+              + dim(" in ") + em("/mcp") + dim(") so the agent uses the new backend."))
 
 
 def reapply(items, interactive):
@@ -1478,16 +1550,16 @@ def reapply(items, interactive):
     done = []
     for r in items:
         if r["scope"] != "global" and not Path(r["path"]).is_dir():
-            print(f"  Skipping {label(r).strip()}: directory no longer exists.")
+            print(dim(f"  Skipping {label(r).strip()}: directory no longer exists."))
             done.append(r)
             continue
         try:
             done.append(SETUP[r["agent"]](bundle, r["scope"], r["path"], r, interactive))
             if r["scope"] == "local" and (root := git_root(r["path"])) and pre_push_of(root):
                 install_pre_push(root)  # refresh hook command for the new version
-            print(f"  Updated {label(r).strip()}")
+            print(f"  {ok('Updated')} {label(r).strip()}")
         except Abort as e:
-            print(f"  Error updating {label(r).strip()}: {e}")
+            print(f"  {warn('Error')} updating {label(r).strip()}: {e}")
             done.append(r)
     save_installs(done)
 
@@ -1499,9 +1571,11 @@ def cmd_update(argv):
     if not ref and not os.environ.get("XDLC_PLUGIN_DIR"):
         ref = latest_release()
         if not ref:
-            raise Abort("No release yet (tag vX.Y.Z) or could not query GitHub.")
-        if _semver(ref) <= _semver(VERSION) and bundle_version() == VERSION:
-            print(f"Already up to date ({VERSION}).")
+            # Temporary until the first vX.Y.Z release exists: pull tip of main.
+            ref = "main"
+            print(dim("No release tag yet; updating from ") + em("main") + dim("."))
+        elif _semver(ref) <= _semver(VERSION) and bundle_version() == VERSION:
+            print(ok("Already up to date") + dim(f" ({VERSION})."))
             return
     src = fetch_bundle(ref)
     new_cli = src / "xdlc"
@@ -1513,7 +1587,9 @@ def cmd_update(argv):
     os.chmod(tmp, 0o755)
     install_bundle(src)
     os.replace(tmp, target)
-    print(f"Updated xdlc and plugin ({ref or 'local copy'}). Reinstalling into existing setups:")
+    src_label = em(ref) if ref else dim("local copy")
+    print(f"{ok('Updated')} {em('xdlc')} and plugin ({src_label}).")
+    print(dim("Reinstalling into existing setups:"))
     # New binary reinstalls itself so install logic is from the new version.
     if WINDOWS:
         raise Abort("", subprocess.run([sys.executable, str(target), "_reapply"]).returncode)
@@ -1521,13 +1597,18 @@ def cmd_update(argv):
 
 
 def cmd_version(argv):
-    print(f"xdlc {VERSION}")
-    print(f"plugin {bundle_version() or 'not downloaded (run xdlc setup)'}")
-    for r in installs():
-        print(f"  {label(r)}   v{r.get('version') or '?'}")
+    plugin = bundle_version()
+    print(f"{bold('xdlc')} {VERSION}")
+    print(f"{bold('plugin')} {plugin or dim('not downloaded (run xdlc setup)')}")
+    print()
+    items = installs()
+    print(f"{bold('Setups:')}" + ("" if items else dim(" none")))
+    for i, r in enumerate(items, 1):
+        print(f"  {i}. {label(r)}   v{r.get('version') or '?'}")
     latest = latest_release()
     if latest and _semver(latest) > _semver(VERSION):
-        print(f"Newer release {latest}: run xdlc update.")
+        print()
+        print(dim(f"Newer release {em(latest)}: run {em('xdlc update')}."))
 
 
 def _remove_from_user_path(folder):
@@ -1548,19 +1629,22 @@ def cmd_uninstall(argv):
     if argv:
         raise Abort("uninstall takes no options.", 2)
     items = installs()
-    print("Will remove all of Xora DLC from this machine:")
+    print(f"{bold('Will remove')} all of {em('Xora DLC')} from this machine:")
+    print()
     for r in items:
-        print(f"  - setup: {label(r).strip()}")
+        print(f"  - {bold('setup:')} {label(r).strip()}")
     hooks = load_json(XDLC / "hooks.json", [])
     for h in hooks:
-        print(f"  - hook pre-push: {short(h)}")
-    print(f"  - login token, work order maps, config, and plugin bundle: {short(XDLC)}")
-    print(f"  - xdlc command: {short(xdlc_path())}")
+        print(f"  - {bold('hook pre-push:')} {short(h)}")
+    print(f"  - {bold('data:')} login token, work order maps, config, and plugin bundle ({short(XDLC)})")
+    print(f"  - {bold('command:')} {short(xdlc_path())}")
+    print()
     if not confirm("Continue?"):
         raise Abort("Cancelled.", 0)
+    print()
     for r in items:
         REMOVE[r["agent"]](r, True)
-        print(f"Removed {label(r).strip()}")
+        print(f"{ok('Removed')} {label(r).strip()}")
     for h in hooks:
         remove_pre_push(h)
     after_claude_removed([])
@@ -1570,7 +1654,9 @@ def cmd_uninstall(argv):
         if WINDOWS:
             (BIN.parent / "xdlc.cmd").unlink(missing_ok=True)
             _remove_from_user_path(BIN.parent)
-    print("Removed Xora DLC. Reinstall: " + INSTALL_CMD)
+    print()
+    print(f"{ok('Removed')} {em('Xora DLC')}.")
+    print(dim(f"Reinstall: {INSTALL_CMD}"))
 
 
 # ── local MCP server for the agent ─────────────────────────────────────────────────────────────────────
@@ -1698,10 +1784,18 @@ def cmd_link(argv):
     cur = link_of(repo_id, branch)
     steps = my_steps()
     if list_only:
-        print(f"Branch {branch} ({repo_id}): " + (step_label(cur) if cur else "no work order mapped"))
-        print("Your in-progress steps (xdlc link <WO> --step <step>):" if steps else "You have no in-progress steps.")
-        for st in steps:
-            print(f"  {st['work_order_id']} --step {st['step_id']}   {st.get('work_order_name') or ''} · {st.get('step_name') or ''}")
+        mapped = step_label(cur) if cur else dim("no work order mapped")
+        print(f"{bold('Branch')} {em(branch)} ({em(repo_id)}): {mapped}")
+        print()
+        if steps:
+            print(dim("Your in-progress steps (") + em("xdlc link <WO>") + dim(" ")
+                  + em("--step") + dim(" <step>):"))
+            for i, st in enumerate(steps, 1):
+                meta = f"{st.get('work_order_name') or ''} · {st.get('step_name') or ''}".strip(" ·")
+                print(f"  {i}. {em(st['work_order_id'])} {em('--step')} {em(st['step_id'])}"
+                      + (f"   {meta}" if meta else ""))
+        else:
+            print(dim("You have no in-progress steps."))
         return
     if wo:
         cands = [st for st in steps if st["work_order_id"].lower() == wo.lower() and (not step_id or st["step_id"] == step_id)]
@@ -1715,10 +1809,13 @@ def cmd_link(argv):
             raise Abort(f"You have no in-progress steps in Xora DLC ({config()['env']}): nothing to map.")
         chosen = pick_step(branch, steps)
     save_link(repo_id, branch, chosen)
-    print(f"Mapped branch {branch} → {step_label(chosen)}" + (f" (was: {cur['work_order_id']})" if cur and
-          (cur["work_order_id"], cur["step_id"]) != (chosen["work_order_id"], chosen["step_id"]) else ""))
+    was = ""
+    if cur and (cur["work_order_id"], cur["step_id"]) != (chosen["work_order_id"], chosen["step_id"]):
+        was = dim(f" (was: {cur['work_order_id']})")
+    print(f"{ok('Mapped')} branch {em(branch)} → {em(step_label(chosen))}{was}")
     if not pre_push_of(root) and install_pre_push(root):
-        print("Installed git pre-push hook for this repo: on push, the sensor sends alerts for the work order above.")
+        print(ok("Installed") + dim(" git pre-push hook for this repo: on push, the sensor sends alerts "
+                                    "for the work order above."))
 
 
 def cmd_reapply(argv):
@@ -1739,22 +1836,22 @@ def main(argv):
             pass
     if not argv or argv[0] in ("-h", "--help", "help"):
         if len(argv) == 2 and argv[1] in ("-v", "version"):
-            print(CMD_HELP["--version"])
+            print_help(CMD_HELP["--version"])
         elif len(argv) == 2 and argv[1] in CMD_HELP:
-            print(CMD_HELP[argv[1]])
+            print_help(CMD_HELP[argv[1]])
         else:
-            print(HELP.format(v=VERSION).rstrip())
+            print_help(HELP.format(v=VERSION))
         return 0
     if argv[0] in ("-v", "--version"):
         argv = ["version", *argv[1:]]
     cmd, rest = argv[0], argv[1:]
     if cmd in COMMANDS and rest[:1] in (["-h"], ["--help"]):
-        print(CMD_HELP[cmd])
+        print_help(CMD_HELP[cmd])
         return 0
     fn = COMMANDS.get(cmd) or HIDDEN.get(cmd)
     if not fn:
         err(f"xdlc: unknown command '{cmd}'.\n")
-        err(HELP.format(v=VERSION).rstrip())
+        print_help(HELP.format(v=VERSION), file=sys.stderr)
         return 2
     try:
         fn(rest)

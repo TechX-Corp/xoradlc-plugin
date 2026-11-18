@@ -346,6 +346,11 @@ def check_claude_bundle(home, xdlc):
         assert not any(c.startswith(("cat ", "python3 ")) for c in cmds), cmds
 
 
+def strip_ansi(s):
+    """Drop CSI sequences so asserts work when the CLI paints TTY output."""
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", s)
+
+
 def pty_run(argv, steps, cwd, env, timeout=60):
     """Chạy xdlc trong terminal giả (pty): mỗi step (chờ chữ này, rồi gõ phím này). → (mã thoát, output)."""
     import pty, select, signal, time
@@ -390,13 +395,14 @@ def check_menu():
         for name in ("a", "b"):
             (Path(tmp) / name).mkdir()
             code, out = pty_run([cli, "setup", "--agent", "kiro"], [("Enter select", down + enter)], Path(tmp) / name, env)
-            assert code == 0 and "› Local" in out and "Installed" in out, out
+            plain = strip_ansi(out)
+            assert code == 0 and "› Local" in plain and "Installed" in plain, out
             assert (Path(tmp) / name / ".kiro" / "skills" / "implement" / "SKILL.md").is_file()
         code, out = pty_run([cli, "remove"], [("Enter confirm", "\x1b")], Path(tmp) / "a", env)
-        assert code == 0 and "Cancelled" in out and (Path(tmp) / "a" / ".kiro").is_dir(), out
+        assert code == 0 and "Cancelled" in strip_ansi(out) and (Path(tmp) / "a" / ".kiro").is_dir(), out
         code, out = pty_run([cli, "remove"], [("Enter confirm", enter), ("Nothing selected", " " + down + " " + enter),
                                                ("Continue?", down + enter)], Path(tmp) / "a", env)
-        assert code == 0 and out.count("Removed") == 2, out
+        assert code == 0 and strip_ansi(out).count("Removed") == 2, out
         assert not (Path(tmp) / "a" / ".kiro").exists() and not (Path(tmp) / "b" / ".kiro").exists()
         assert json.loads((home / ".xdlc" / "installs.json").read_text(encoding="utf-8"))["installs"] == []
 

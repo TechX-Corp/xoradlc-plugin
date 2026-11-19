@@ -5,6 +5,7 @@ package tui
 import (
 	"os"
 	"syscall"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -68,27 +69,31 @@ func readKey(r keyReader) (string, error) {
 	case 'q', 4:
 		return "esc", nil
 	case 27:
-		seq := make([]byte, 2)
-		_ = readMore(r, seq)
-		switch string(seq) {
-		case "[A", "OA":
-			return "up", nil
-		case "[B", "OB":
-			return "down", nil
-		default:
+		// Lone Esc is a single byte; arrow keys are Esc + "[A" etc. Do not block waiting for a sequence.
+		_ = os.Stdin.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+		defer func() { _ = os.Stdin.SetReadDeadline(time.Time{}) }()
+		seq := make([]byte, 3)
+		n, err := r.Read(seq)
+		if err != nil || n == 0 {
 			return "esc", nil
 		}
+		if seq[0] == '[' {
+			switch {
+			case n >= 2 && seq[1] == 'A':
+				return "up", nil
+			case n >= 2 && seq[1] == 'B':
+				return "down", nil
+			}
+		} else if seq[0] == 'O' {
+			switch {
+			case n >= 2 && seq[1] == 'A':
+				return "up", nil
+			case n >= 2 && seq[1] == 'B':
+				return "down", nil
+			}
+		}
+		return "esc", nil
 	default:
 		return "", nil
 	}
-}
-
-func readMore(r keyReader, buf []byte) error {
-	for i := range buf {
-		n, err := r.Read(buf[i : i+1])
-		if err != nil || n == 0 {
-			return err
-		}
-	}
-	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/TechX-Corp/xoradlc-plugin/internal/cli"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/config"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/fsutil"
+	"github.com/TechX-Corp/xoradlc-plugin/internal/tui"
 )
 
 // AuthTokens is the on-disk OAuth token set.
@@ -22,6 +24,9 @@ type AuthTokens struct {
 
 var tokenMu sync.Mutex
 
+// NotLoggedInMsg is the user-facing hint when OAuth session is missing.
+const NotLoggedInMsg = "Not logged in. Run xdlc login first."
+
 func authPath() string {
 	return filepath.Join(config.XDLC(), "auth.json")
 }
@@ -29,6 +34,9 @@ func authPath() string {
 func loadRaw() (map[string]any, error) {
 	var raw map[string]any
 	if err := fsutil.LoadJSON(authPath(), &raw); err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
 		return nil, err
 	}
 	if raw == nil {
@@ -171,16 +179,16 @@ type UserInfo map[string]any
 func Whoami() (UserInfo, string) {
 	token, err := AccessToken(false)
 	if err != nil {
-		return nil, err.Error()
+		return nil, NotLoggedInMsg
 	}
 	if token == "" {
-		return nil, "not logged in (run xdlc login)"
+		return nil, NotLoggedInMsg
 	}
 	status, out := oauthRequest("GET", config.BaseURL()+"/oauth/userinfo", nil, token)
 	if status == 401 {
 		token, err = AccessToken(true)
 		if err != nil {
-			return nil, err.Error()
+			return nil, NotLoggedInMsg
 		}
 		if token != "" {
 			status, out = oauthRequest("GET", config.BaseURL()+"/oauth/userinfo", nil, token)
@@ -206,26 +214,9 @@ func AccountLine(u UserInfo) string {
 	if r, ok := u["role"].(string); ok {
 		role = r
 	}
-	role = stringsUpper(role)
-	if role == "" {
-		role = "no role"
-	}
 	name := fmt.Sprint(u["name"])
 	user := fmt.Sprint(u["username"])
-	return fmt.Sprintf("%s (%s) · role %s", name, user, role)
-}
-
-func stringsUpper(s string) string {
-	if s == "" {
-		return ""
-	}
-	b := []byte(s)
-	for i := range b {
-		if b[i] >= 'a' && b[i] <= 'z' {
-			b[i] -= 'a' - 'A'
-		}
-	}
-	return string(b)
+	return fmt.Sprintf("%s (%s) · role %s", name, user, tui.RoleLabel(role))
 }
 
 // Logout deletes stored tokens.
@@ -243,6 +234,18 @@ func Logout() error {
 // StoreGranted saves tokens from an OAuth grant response (login / refresh).
 func StoreGranted(granted map[string]any) (*AuthTokens, error) {
 	return store(granted)
+}
+
+// RequireLoggedIn fails with a friendly message when there is no session.
+func RequireLoggedIn() error {
+	u, why := Whoami()
+	if u != nil {
+		return nil
+	}
+	if why == "" {
+		why = NotLoggedInMsg
+	}
+	return cli.Fail(why)
 }
 
 // FinishLogin validates post-login output (optional helper for cmd layer).

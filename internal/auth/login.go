@@ -173,15 +173,81 @@ func openBrowser(u string) {
 	_ = cmd.Start()
 }
 
+const oauthCallbackPageCSS = `
+  :root {
+    color-scheme: dark;
+    --xora-bg: #1f1f23;
+    --xora-sidebar: #18181b;
+    --xora-text: #ececf0;
+    --xora-text-muted: #a1a4aa;
+    --xora-text-faint: #8f9298;
+    --xora-line: #34343b;
+    --xora-primary-text: #c1c9f6;
+    --xora-success-soft: #163323;
+    --xora-success-text: #7ddba3;
+    --xora-danger-soft: #3b1d1a;
+    --xora-danger-text: #ff9f96;
+    --xora-font-sans: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    --xora-radius-card: 14px;
+    --xora-radius-full: 999px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    padding: 40px 16px;
+    font: 400 14px / 1.55 var(--xora-font-sans);
+    background: var(--xora-sidebar);
+    color: var(--xora-text);
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    width: min(420px, 100%);
+    border: 1px solid var(--xora-line);
+    border-radius: var(--xora-radius-card);
+    background: var(--xora-bg);
+    padding: 28px 24px 24px;
+    text-align: center;
+  }
+  .brand {
+    margin: 0 0 16px;
+    font-size: 16px; font-weight: 700; line-height: 1.4;
+    color: var(--xora-primary-text);
+  }
+  .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; height: 22px; padding: 0 9px; margin: 0 0 12px;
+    border: 0; border-radius: var(--xora-radius-full);
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .badge svg { flex-shrink: 0; display: block; }
+  main[data-status="ok"] .badge {
+    background: var(--xora-success-soft); color: var(--xora-success-text);
+  }
+  main[data-status="bad"] .badge {
+    background: var(--xora-danger-soft); color: var(--xora-danger-text);
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 22px; font-weight: 700; line-height: 1.3;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .body { margin: 0; color: var(--xora-text-muted); font-size: 14px; }
+  .hint { margin: 20px 0 0; color: var(--xora-text-faint); font-size: 12px; font-weight: 500; }
+`
+
+const oauthCallbackIconOK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`
+const oauthCallbackIconBad = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`
+
 func oauthCallbackPage(success bool, detail string) []byte {
-	// Minimal port of Python _oauth_callback_page (dark theme).
-	var status, title, body, hint, badge string
+	var status, title, body, hint, badgeLabel, icon string
 	if success {
 		status = "ok"
 		title = "You're signed in"
 		body = "Return to the terminal — you can close this tab."
 		hint = "This window can be closed."
-		badge = "Signed in"
+		badgeLabel = "Signed in"
+		icon = oauthCallbackIconOK
 	} else {
 		status = "bad"
 		title = "Sign-in didn't complete"
@@ -190,20 +256,29 @@ func oauthCallbackPage(success bool, detail string) []byte {
 		}
 		body = html.EscapeString(detail)
 		hint = "Close this tab and run xdlc login again in the terminal."
-		badge = "Failed"
+		badgeLabel = "Failed"
+		icon = oauthCallbackIconBad
 	}
 	page := fmt.Sprintf(`<!doctype html>
 <html lang="en" data-theme="dark">
-<head><meta charset="utf-8"><title>Xora DLC</title></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xora DLC</title>
+<style>%s</style>
+</head>
 <body>
-<main data-status="%s">
-<p class="brand">Xora DLC</p>
-<span class="badge">%s</span>
-<h1>%s</h1>
-<p class="body">%s</p>
-<p class="hint">%s</p>
-</main>
-</body></html>`, status, html.EscapeString(badge), html.EscapeString(title), body, html.EscapeString(hint))
+  <main data-status="%s" role="status">
+    <p class="brand">Xora DLC</p>
+    <span class="badge">%s%s</span>
+    <h1>%s</h1>
+    <p class="body">%s</p>
+    <p class="hint">%s</p>
+  </main>
+</body>
+</html>`,
+		oauthCallbackPageCSS, status, icon, html.EscapeString(badgeLabel),
+		html.EscapeString(title), body, html.EscapeString(hint))
 	return []byte(page)
 }
 

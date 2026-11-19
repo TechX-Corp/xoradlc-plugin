@@ -25,6 +25,8 @@ func Menu(title string, labels []string, multi bool) ([]int, error) {
 		return menuPlain(title, labels, multi)
 	}
 	n := len(labels)
+	// Title + n options + tip row — kept in one redraw/clear block so back-to-back menus do not overlap.
+	menuLines := n + 2
 	tips := menuTips(multi)
 	cur := 0
 	marked := map[int]struct{}{}
@@ -38,8 +40,9 @@ func Menu(title string, labels []string, multi bool) ([]int, error) {
 
 	draw := func(first bool) {
 		if !first {
-			_, _ = fmt.Fprintf(out, "\x1b[%dA", n+1)
+			_, _ = fmt.Fprintf(out, "\x1b[%dA", menuLines)
 		}
+		_, _ = fmt.Fprint(out, "\r\x1b[2K"+title+"\n")
 		for i, text := range labels {
 			var prefix string
 			if multi {
@@ -79,7 +82,6 @@ func Menu(title string, labels []string, multi bool) ([]int, error) {
 		_ = out.Sync()
 	}
 
-	fmt.Println(title)
 	_, _ = fmt.Fprint(out, "\x1b[?25l")
 	raw, err := enterRaw()
 	if err != nil {
@@ -87,7 +89,7 @@ func Menu(title string, labels []string, multi bool) ([]int, error) {
 	}
 	defer func() {
 		_ = raw.Close()
-		_, _ = fmt.Fprint(out, fmt.Sprintf("\x1b[%dA\x1b[J\x1b[?25h", n+1))
+		_, _ = fmt.Fprint(out, fmt.Sprintf("\x1b[%dA\x1b[J\x1b[?25h", menuLines))
 		_ = out.Sync()
 	}()
 
@@ -146,6 +148,9 @@ func Menu(title string, labels []string, multi bool) ([]int, error) {
 	for _, i := range result {
 		fmt.Printf("  › %s\n", Bold(labels[i]))
 	}
+	// Callers often Println next; ensure cursor is on a fresh line after raw-mode redraw.
+	_, _ = fmt.Fprint(out, "\r\x1b[2K\n")
+	_ = out.Sync()
 	return result, nil
 }
 

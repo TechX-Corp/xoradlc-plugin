@@ -1,5 +1,5 @@
 # Go unit tests + cross-platform smoke (install, setup, OAuth/MCP against a fake backend, sensor, TTY menus).
-# On push to main: after all three OS smokes pass, tag v{Version} from config.go when that tag is new (triggers release.yml).
+# On push to main: after smoke ×3, tag v{Version} then publish-release (GITHUB_TOKEN tag pushes do not trigger release.yml).
 name: xdlc & plugin tests
 
 on:
@@ -86,4 +86,65 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$tag" -m "xdlc ${version}"
           git push origin "refs/tags/${tag}"
-          echo "Pushed $tag — release workflow will build and publish binaries."
+          echo "Pushed $tag — publish-release job will upload Release assets."
+
+  publish-release:
+    name: publish GitHub Release assets
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: tag-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether Release assets are needed
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' internal/config/config.go | head -1)
+          tag="v${version}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "needs=1" >> "$GITHUB_OUTPUT"
+            echo "No Release for $tag — will publish after build."
+          elif [ "$(gh release view "$tag" --json assets -q '.assets | length')" = "0" ]; then
+            echo "needs=1" >> "$GITHUB_OUTPUT"
+            echo "Release $tag has no assets — will upload."
+          else
+            echo "needs=0" >> "$GITHUB_OUTPUT"
+            echo "Release $tag already has assets; skipping."
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.release.outputs.needs == '1'
+        with:
+          go-version: "1.22.x"
+
+      - name: Build binaries
+        if: steps.release.outputs.needs == '1'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for pair in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os=${pair%/*}
+            arch=${pair#*/}
+            out="dist/xdlc-${os}-${arch}"
+            if [ "$os" = windows ]; then out="${out}.exe"; fi
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/xdlc
+          done
+          ls -la dist
+
+      - name: Create GitHub Release
+        if: steps.release.outputs.needs == '1'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          files: dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

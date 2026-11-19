@@ -102,15 +102,48 @@ func CmdUninstall(argv []string) error {
 		}
 		fmt.Printf("%s %s\n", tui.Ok("Removed"), strings.TrimSpace(installs.Label(r)))
 	}
-	_ = os.RemoveAll(config.XDLC())
-	bin := config.BinPath()
-	if st, err := os.Stat(bin); err == nil && !st.IsDir() {
-		_ = os.Remove(bin)
-	}
+	removeDataDir(config.XDLC())
+	removeInstalledBinary(config.BinPath())
 	fmt.Println()
 	fmt.Printf("%s %s.\n", tui.Ok("Removed"), tui.Em("Xora DLC"))
 	fmt.Println(tui.Dim("Reinstall: " + config.InstallCmd()))
 	return nil
+}
+
+func removeDataDir(dir string) {
+	if dir == "" {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err == nil && info != nil && !info.IsDir() {
+				_ = os.Chmod(path, 0o666)
+			}
+			return nil
+		})
+	}
+	_ = os.RemoveAll(dir)
+}
+
+// removeInstalledBinary deletes the on-disk xdlc command. On Windows a running
+// .exe cannot be unlinked, but it can be renamed aside so the PATH name is gone.
+func removeInstalledBinary(bin string) {
+	st, err := os.Stat(bin)
+	if err != nil || st.IsDir() {
+		return
+	}
+	if err := os.Remove(bin); err == nil {
+		return
+	}
+	if runtime.GOOS != "windows" {
+		return
+	}
+	old := bin + ".old"
+	_ = os.Remove(old)
+	if err := os.Rename(bin, old); err != nil {
+		return
+	}
+	_ = os.Remove(old) // may still be locked until this process exits; name xdlc.exe is gone
 }
 
 // CmdReapply hidden command after update.

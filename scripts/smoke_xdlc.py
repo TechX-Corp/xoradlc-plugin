@@ -295,7 +295,11 @@ def check_xdlc():
         assert json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {"postgres": {"command": "pg"}}
         assert "Logged out" in x("logout") and "not logged in" in x("status")
         assert "Removed Xora DLC" in x("uninstall", inp="2\n")  # 2 = Yes
-        assert not (home / ".xdlc").exists() and not xdlc.exists()
+        left_xdlc = (home / ".xdlc").exists()
+        left_bin = xdlc.exists()
+        # Windows may leave xdlc.exe.old while the process is still running; the PATH name must be gone.
+        left_old = (xdlc.with_suffix(xdlc.suffix + ".old")).exists() if WIN else False
+        assert not left_xdlc and not left_bin, f"uninstall leftovers: .xdlc={left_xdlc} bin={left_bin} old={left_old} path={xdlc}"
         assert "xdlc:begin" not in (lr / ".git" / "info" / "exclude").read_text(encoding="utf-8")
         assert not (pp / ".git" / "hooks" / "pre-push").exists() and not (home / ".kiro" / "hooks").exists()
     srv.shutdown()

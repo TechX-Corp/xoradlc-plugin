@@ -1,125 +1,136 @@
 ---
 name: git-create-pr
 description: >-
-  Synchronize the current branch with its base branch, resolve conflicts,
-  verify changes, and create a pull request. Use when the user asks to create a
-  PR, open a pull request, push for review, or ship the branch. Follow root
-  AGENTS.md Git safety and BASE_BRANCH.
+  Sync with base, rebase, resolve conflicts, verify, then (when shipping) propose
+  semver, bump Version in a dedicated commit after user confirms, and open a PR.
+  Merge triggers CI auto-tag and Release binaries. Use for PR, ship, or review.
+  Follow root AGENTS.md Git safety.
 ---
 
-# Create Pull Request
+# Create Pull Request (and ship xdlc)
 
-Follow root `AGENTS.md` Git safety.
+Follow root `AGENTS.md` Git safety and §7 (auto-tag on **BASE_BRANCH** after smoke ×3).
+
+**Resolve base branch:**
+
+1. User-specified base branch.
+2. `BASE_BRANCH` in root `AGENTS.md`.
+3. Default `main`.
+
+Below, **BASE_BRANCH** means that resolved name.
 
 ## 1. Determine Base Branch
 
-Determine the base branch using this priority:
-
-1. Base branch explicitly specified by the user.
-2. `BASE_BRANCH` configured in the project's root `AGENTS.md`.
-3. Default to `main` if neither is specified.
-
-Verify that the selected base branch exists locally or remotely.
-
-If the base branch cannot be found, stop and ask the user.
+Verify **BASE_BRANCH** exists. If not, stop and ask.
 
 ## 2. Check Working Tree
 
-1. Identify the current working branch.
-2. Save the current branch name.
-3. Ensure the current branch is not the base branch.
-4. Inspect the working tree using `git status`.
-5. Ensure there are no uncommitted changes.
+1. Save the current branch (must not be **BASE_BRANCH**).
+2. Feature work should be **committed** before sync; the bump commit (§6) is added later.
 
-If uncommitted changes exist:
-
-- Stop the workflow.
-- Inform the user which files have uncommitted changes.
-- Do not stash, discard, or commit them automatically.
+Uncommitted changes the user did not ask to include → stop and list files.
 
 ## 3. Synchronize with Base Branch
 
-1. Checkout the selected base branch.
-2. Pull the latest changes from its remote.
-3. Checkout the original working branch.
-4. Rebase the current branch onto the updated base branch.
+Checkout **BASE_BRANCH**, pull. Checkout working branch, **rebase** onto **BASE_BRANCH**.
 
-Use the appropriate remote tracking branch when pulling.
-
-Do not rebase onto an outdated local base branch.
+On conflicts → `git-resolve-conflict`, then `git rebase --continue` until done.
 
 ## 4. Resolve Conflicts
 
-If rebase encounters conflicts:
+Inspect conflicted files, resolve, stage, continue rebase. Standalone fix outside rebase → `git-commit` skill.
 
-1. Inspect the conflicted files.
-2. Invoke the `git-resolve-conflict` skill to analyze and resolve conflicts.
-3. Review the resolved changes.
-4. Stage the resolved files.
-5. Continue the rebase using `git rebase --continue`.
-6. Repeat until the rebase completes successfully.
+## 5. Verify Changes (before bump)
 
-If a standalone commit is required outside the rebase process, invoke the `git-commit` skill.
+1. Confirm branch and **clean** working tree (no pending bump yet).
+2. Review full diff and history vs **BASE_BRANCH**.
+3. Run checks appropriate to the diff:
 
-Important:
+```bash
+go test ./...
+```
 
-- Do not create unnecessary commits for changes already included in a replayed commit.
-- During rebase, use `git rebase --continue` rather than creating a new commit manually.
-- If conflicts cannot be resolved safely, stop and ask the user.
-- Do not automatically abort the rebase without explaining the situation.
+When diff touches shipped surfaces (§6 triggers) or user asked to ship, also:
 
-## 5. Verify Changes
-
-After rebase completes:
-
-1. Verify that the current branch is the original working branch.
-2. Verify that the working tree is clean.
-3. Review the complete diff against the selected base branch.
-4. Review the commit history.
-5. Run relevant tests, lint, and type checks.
-6. Ensure no unintended changes were introduced.
+```bash
+go build -o xdlc ./cmd/xdlc   # Windows: -o xdlc.exe
+python3 scripts/smoke_xdlc.py
+```
 
 Do not proceed if verification fails.
 
-## 6. Prepare Pull Request Information
+## 6. Version bump — last step before the PR
 
-Only after synchronization and verification are complete:
+Run **only after** §3–§5 succeed. This is the **last** commit on the branch before push/PR.
 
-1. Generate a concise PR title.
-2. Generate a PR description containing:
+### 6.0 When to run
 
-   - Summary
-   - Changes
-   - Testing
+**Run** when any of:
 
-3. Follow the project's existing PR conventions if available.
+1. User asked to **ship**, **release**, **cut a version**, or **publish** `xdlc`.
+2. Diff vs **BASE_BRANCH** touches: `cmd/xdlc/`, `internal/`, `roles/`, `host-agents/`, `standards/`, `install.sh`, `install.ps1`.
 
-Do not invent completed work or test results.
+**Skip** when all of:
 
-## 7. Push and Create Pull Request
+- No ship/release intent.
+- Diff is only e.g. `aidlc-plugin/`, docs, or `.agents/` with no CLI/pack change.
+- **Or** branch already bumps `Version` vs **BASE_BRANCH** and `USER_GUIDE.md` Commands fence matches `xdlc -h` (fix fence only if drift).
 
-After preparing the PR information:
+### 6.1 Propose semver
 
-1. Check whether the current branch has an upstream remote.
-2. Push the current branch to its remote if necessary.
-3. If rebase rewrote previously pushed commits, use `--force-with-lease` only when necessary.
-4. Create the pull request using the available Git provider CLI or integration.
-5. Set the selected base branch as the PR target.
-6. **Self-assign** the PR to the current authenticated user (the person running the agent), unless the user named a different assignee or asked not to assign.
-   - GitHub CLI examples: `gh pr create ... --assignee @me`, or after create: `gh pr edit <n> --add-assignee @me`.
-   - If assignment fails (permissions / auth), report it; still return the PR URL.
-7. Return the PR URL.
+1. Read `Version` in `internal/config/config.go`.
+2. Optional: `git fetch --tags` and compare to latest `v*.*.*`.
+3. Propose next **SemVer** (highest applicable since last tag):
 
-If the Git provider is unavailable or authentication fails, report the issue without claiming that the PR was created.
+| Bump | Example | When |
+|---|---|---|
+| **patch** | `0.2.1` → `0.2.2` | Bugfix, small UX; no breaking contract |
+| **minor** | `0.2.x` → `0.3.0` | New capability; backward compatible |
+| **major** | `0.x` → `1.0.0` | Breaking: MCP rename, `~/.xdlc` schema, removed commands, install layout |
+
+4. **Stop and ask the user** to accept or change. No file edits until confirmed (unless they already gave the exact version — show it once).
+
+### 6.2 Apply bump commit
+
+After confirmation:
+
+1. Update `Version` in `internal/config/config.go`.
+2. Sync `USER_GUIDE.md` Commands block from `./xdlc -h` (rebuild if needed).
+3. Grep for stale version strings.
+4. Commit bump only: `chore(xdlc): bump version to X.Y.Z` (`git-commit`).
+
+Re-run after bump:
+
+```bash
+go test ./...
+python3 scripts/smoke_xdlc.py
+```
+
+Do **not** push a release tag; merge → CI `tag-release` → `release.yml`.
+
+## 7. Prepare Pull Request Information
+
+Title, body: Summary, Changes, Test plan.
+
+If §6 ran, note: merge publishes `vX.Y.Z` (CI auto-tag + 6 Release assets); checklist PR smokes → merge → watch Actions.
+
+Do not invent CI results.
+
+## 8. Push and Create Pull Request
+
+Push (`--force-with-lease` if rebase rewrote history). `gh pr create` to **BASE_BRANCH**. Self-assign `@me` unless user said otherwise. Return PR URL.
+
+If user authorized push/PR in the same request, do not ask again.
+
+## After merge (optional)
+
+If user asks whether release landed: **BASE_BRANCH** CI → job `tag release if new version` → workflow `release` → GitHub Release page and six assets (`AGENTS.md` §7).
 
 ## Rules
 
-- Always use the selected base branch as the PR target.
-- Never push directly to the base branch.
-- Never use `git push --force`.
-- Never discard changes without understanding their purpose.
-- Never claim tests passed if they were not executed.
-- Never create the PR before synchronization and verification are complete.
-- Never commit automatically except when required by a standalone conflict-resolution change.
-- Ask for confirmation before pushing or creating a PR unless explicitly authorized.
-- Self-assign the PR to the current user by default (`@me` / authenticated account); skip only if the user specifies another assignee or says not to assign.
+- Never push to **BASE_BRANCH** directly.
+- Never `git push --force` (only `--force-with-lease` after rebase).
+- Never bump without user confirmation (§6.1).
+- Order: **rebase → conflicts → verify → bump (last commit) → PR**.
+- Never open PR before §5 passes and §6 completes or is skipped.
+- Shipping: one bump commit on top → merge once → auto release.

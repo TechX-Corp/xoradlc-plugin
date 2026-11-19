@@ -1,10 +1,14 @@
 # Go unit tests + cross-platform smoke (install, setup, OAuth/MCP against a fake backend, sensor, TTY menus).
+# On push to main: after all three OS smokes pass, tag v{Version} from config.go when that tag is new (triggers release.yml).
 name: xdlc & plugin tests
 
 on:
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   cross-platform:
@@ -34,3 +38,52 @@ jobs:
           fi
       - name: Smoke (scripts/smoke_xdlc.py)
         run: python scripts/smoke_xdlc.py
+
+  tag-release:
+    name: tag release if new version
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: cross-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create tag v{Version} when not already on this commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' internal/config/config.go | head -1)
+          if [ -z "$version" ]; then
+            echo "::error::Could not read Version from internal/config/config.go"
+            exit 1
+          fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be semver X.Y.Z, got: $version"
+            exit 1
+          fi
+          tag="v${version}"
+          head=$(git rev-parse HEAD)
+          echo "main @ $head — embedded Version=$version → tag $tag"
+
+          git fetch --tags origin
+
+          if git rev-parse "$tag^{commit}" >/dev/null 2>&1; then
+            existing=$(git rev-parse "$tag^{commit}")
+            if [ "$existing" = "$head" ]; then
+              echo "Tag $tag already points at this commit; nothing to do."
+              exit 0
+            fi
+            echo "::error::Tag $tag already exists at $existing but main is $head."
+            echo "Bump Version in internal/config/config.go (and USER_GUIDE.md Commands fence) in the PR before merge."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "xdlc ${version}"
+          git push origin "refs/tags/${tag}"
+          echo "Pushed $tag — release workflow will build and publish binaries."

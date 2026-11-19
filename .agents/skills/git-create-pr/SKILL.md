@@ -105,7 +105,10 @@ After preparing the PR information:
 3. If rebase rewrote previously pushed commits, use `--force-with-lease` only when necessary.
 4. Create the pull request using the available Git provider CLI or integration.
 5. Set the selected base branch as the PR target.
-6. Return the PR URL.
+6. **Self-assign** the PR to the current authenticated user (the person running the agent), unless the user named a different assignee or asked not to assign.
+   - GitHub CLI examples: `gh pr create ... --assignee @me`, or after create: `gh pr edit <n> --add-assignee @me`.
+   - If assignment fails (permissions / auth), report it; still return the PR URL.
+7. Return the PR URL.
 
 If the Git provider is unavailable or authentication fails, report the issue without claiming that the PR was created.
 
@@ -119,3 +122,4 @@ If the Git provider is unavailable or authentication fails, report the issue wit
 - Never create the PR before synchronization and verification are complete.
 - Never commit automatically except when required by a standalone conflict-resolution change.
 - Ask for confirmation before pushing or creating a PR unless explicitly authorized.
+- Self-assign the PR to the current user by default (`@me` / authenticated account); skip only if the user specifies another assignee or says not to assign.

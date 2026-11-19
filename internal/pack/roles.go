@@ -75,7 +75,7 @@ func ResolveRolePack(bundle string) (roleID string, agentsPath string, err error
 	}
 	u, _ := auth.Whoami()
 	if u == nil {
-		return "", "", cli.Fail(auth.NotLoggedInMsg)
+		return "", "", cli.Fail(auth.NotLoggedInHint())
 	}
 	raw := strings.TrimSpace(fmt.Sprint(u["role"]))
 	if raw == "" {

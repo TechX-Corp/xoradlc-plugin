@@ -226,8 +226,10 @@ def check_xdlc():
         lr = Path(tmp) / "lr"; lr.mkdir(); g(lr, "init", "-q")
         assert "Global" in x("setup", "--agent", "kiro", cwd=lr, inp="2\n")
         exclude = (lr / ".git" / "info" / "exclude").read_text(encoding="utf-8")
-        assert "/.kiro/skills/implement/SKILL.md" in exclude and "/.kiro/settings/mcp.json" in exclude, exclude
-        assert g(lr, "status", "--porcelain") == "", "Local: git không thấy file"
+        excl_lines = {ln.strip() for ln in exclude.splitlines() if ln.strip()}
+        assert "/.kiro/skills/implement/SKILL.md" in excl_lines and "/.kiro/settings/mcp.json" in excl_lines, exclude
+        porc = g(lr, "status", "--porcelain")
+        assert porc == "", f"Local: git không thấy file; porcelain={porc!r}; exclude={exclude!r}"
         assert "terminal" in x("setup", "--agent", "kiro", cwd=lr, inp="", ok=False), "không có terminal thì không tự đoán"
 
         # mcp.json đã được team commit: chọn "gỡ khỏi git" hoặc "giữ như hiện tại".

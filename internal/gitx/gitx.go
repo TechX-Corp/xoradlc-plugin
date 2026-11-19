@@ -69,11 +69,22 @@ func SetExclude(base string, rels []string) error {
 		return nil
 	}
 	baseAbs, _ := filepath.Abs(base)
-	rel, err := filepath.Rel(root, baseAbs)
-	if err != nil {
-		rel = "."
+	rootAbs, _ := filepath.Abs(root)
+	// Windows CI often disagrees on Getwd vs git toplevel (8.3 short names,
+	// runneradmin vs RUNNER~1). Treat equivalent paths as repo root.
+	prefix := "."
+	if !sameDir(baseAbs, rootAbs) {
+		rel, err := filepath.Rel(rootAbs, baseAbs)
+		if err != nil || rel == "." || rel == "" {
+			prefix = "."
+		} else {
+			prefix = filepath.ToSlash(filepath.Clean(rel))
+			if prefix == ".." || strings.HasPrefix(prefix, "../") {
+				// Outside the repo as git sees it — still exclude as if at root.
+				prefix = "."
+			}
+		}
 	}
-	prefix := filepath.ToSlash(rel)
 	begin := "# xdlc:begin / (Xora DLC, Local)"
 	if prefix != "." {
 		begin = "# xdlc:begin " + prefix + " (Xora DLC, Local)"
@@ -102,9 +113,16 @@ func SetExclude(base string, rels []string) error {
 			pre = prefix + "/"
 		}
 		sorted := append([]string(nil), rels...)
+		for i, r := range sorted {
+			sorted[i] = filepath.ToSlash(filepath.Clean(strings.ReplaceAll(r, "\\", "/")))
+			sorted[i] = strings.TrimPrefix(sorted[i], "./")
+		}
 		sort.Strings(sorted)
 		lines = append(lines, begin)
 		for _, r := range sorted {
+			if r == "" || r == "." {
+				continue
+			}
 			lines = append(lines, "/"+pre+r)
 		}
 		lines = append(lines, config.ExcludeEnd)
@@ -272,6 +290,26 @@ func runGitCheck(cwd string, args ...string) (string, bool) {
 	cmd.Dir = cwd
 	b, err := cmd.CombinedOutput()
 	return string(b), err == nil
+}
+
+func sameDir(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil {
+		ra = a
+	}
+	if errB != nil {
+		rb = b
+	}
+	ra, _ = filepath.Abs(ra)
+	rb, _ = filepath.Abs(rb)
+	ra = filepath.Clean(ra)
+	rb = filepath.Clean(rb)
+	if ra == rb {
+		return true
+	}
+	// Windows: compare case-insensitive and slash-normalized.
+	return strings.EqualFold(filepath.ToSlash(ra), filepath.ToSlash(rb))
 }
 
 func indexOf(lines []string, s string) int {

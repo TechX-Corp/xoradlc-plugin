@@ -34,8 +34,9 @@ func InstallStandards(man map[string]any, bundle, base string, files map[string]
 			continue
 		}
 		src := filepath.Join(stdSrc, srcName)
+		dest = filepath.ToSlash(dest)
 		if st, err := os.Stat(src); err == nil && !st.IsDir() {
-			digest, err := fsutil.CopyFile(src, filepath.Join(base, dest))
+			digest, err := fsutil.CopyFile(src, filepath.Join(base, filepath.FromSlash(dest)))
 			if err != nil {
 				return err
 			}
@@ -163,7 +164,10 @@ func SetupKiro(bundle, scope, path string, old *Record, interactive bool, roleID
 		gitChoice = ""
 	}
 	files := map[string]string{}
-	digest, err := fsutil.CopyFile(agentsSrc, filepath.Join(base, agentsRel))
+	agentsRel = filepath.ToSlash(agentsRel)
+	mcpRel = filepath.ToSlash(mcpRel)
+	skillsRel = filepath.ToSlash(skillsRel)
+	digest, err := fsutil.CopyFile(agentsSrc, filepath.Join(base, filepath.FromSlash(agentsRel)))
 	if err != nil {
 		return Record{}, err
 	}
@@ -177,8 +181,8 @@ func SetupKiro(bundle, scope, path string, old *Record, interactive bool, roleID
 		if safe == "" {
 			safe = "skill"
 		}
-		rel := filepath.ToSlash(filepath.Join(skillsRel, safe, "SKILL.md"))
-		dst := filepath.Join(base, rel)
+		rel := filepath.ToSlash(filepath.Join(filepath.FromSlash(skillsRel), safe, "SKILL.md"))
+		dst := filepath.Join(base, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return Record{}, err
 		}

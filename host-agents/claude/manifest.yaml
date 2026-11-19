@@ -1,0 +1,30 @@
+id: claude
+display_name: Claude Code
+prerequisites:
+  - command: claude
+    required: true
+    note: Install Claude Code first.
+mcp:
+  name: xora-dlc
+  # Docs: project .mcp.json; user/personal ~/.claude.json — no marketplace required
+  config_path_local: .mcp.json
+  config_path_global: .claude.json
+artifacts:
+  # Role instructions → CLAUDE.md (Claude reads this; AGENTS.md alone is not auto-loaded)
+  agents_md: CLAUDE.md
+  skills_dir: .claude/skills
+  settings_local: .claude/settings.local.json
+  settings_global: .claude/settings.json
+standards:
+  - source: MCP_ROUTING.md
+    dest: .claude/xora-dlc/MCP_ROUTING.md
+hooks:
+  # Relative to this host pack (host-agents/claude/)
+  - source: hooks/session-start.json
+    kind: session_start_print
+  - source: hooks/usage.json
+    kind: usage
+setup:
+  strategy: copy_files
+remove:
+  strategy: delete_tracked

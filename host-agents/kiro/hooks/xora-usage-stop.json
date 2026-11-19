@@ -1,0 +1,32 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Xora DLC usage Stop",
+      "description": "After agent turn: report Kiro credits to Xora DLC POST /usage.",
+      "trigger": "Stop",
+      "action": {
+        "type": "command",
+        "command": "xdlc usage --hook kiro"
+      }
+    },
+    {
+      "name": "Xora DLC usage SessionEnd",
+      "description": "Flush pending usage queue when CLI V3 session ends.",
+      "trigger": "SessionEnd",
+      "action": {
+        "type": "command",
+        "command": "xdlc usage --hook kiro --flush"
+      }
+    },
+    {
+      "name": "Xora DLC usage SessionStart",
+      "description": "Flush pending usage queue when a session starts.",
+      "trigger": "SessionStart",
+      "action": {
+        "type": "command",
+        "command": "xdlc usage --hook kiro --flush"
+      }
+    }
+  ]
+}

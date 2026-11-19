@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "xora-dev": {
-      "command": "sh",
-      "args": ["-c", "exec \"${XDLC_BIN_DIR:-$HOME/.local/bin}/xdlc\" mcp"]
-    }
-  }
-}

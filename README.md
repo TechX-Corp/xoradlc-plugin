@@ -1,10 +1,45 @@
-# xoradlc-plugin
+# xoradlc-plugin (technical)
 
-This repo holds two independent plugin groups, each in its own directory:
+This repository ships **Xora DLC** integration for coding agents (`xdlc` + role/host packs) and a separate **AI-DLC** plugin.
 
-| Directory | What it is | Requirements |
-|---|---|---|
-| [`aidlc-plugin/`](aidlc-plugin/README.md) | AI-DLC plugin `techx-dlc`: 2 scopes (`techx-dlc-onboard`, `techx-dlc-feature`) + 23 overlays | `aidlc` 2.11.2+; use `--plugin-root aidlc-plugin` |
-| [`agents-plugin/`](agents-plugin/README.md) + [`xdlc`](xdlc) | `xora-dev` plugin (Developer role; other roles under `archived/`) for Claude Code and Kiro, connected to Xora DLC and the AAP agent. Install and manage with `xdlc` | Python 3.9+ (macOS, Linux, Windows); `aidlc` not required |
+| Path | What it is |
+|---|---|
+| `xdlc` / `cmd/xdlc` | Go CLI binary: login, setup/remove, MCP proxy (`xora-dlc` / `xora_ask`), link, sensor, update |
+| `roles/catalog.yaml` | Enable/disable role packs + map `whoami.role` → pack id |
+| `roles/<id>/AGENTS.md` | Per-role instructions (installable only if `enabled: true`) |
+| `host-agents/<host>/` | Per-host pack: `manifest.yaml`, hook JSON, and Go adapters (parse transcript / agent email) |
+| `standards/MCP_ROUTING.md` | Shared MCP intent → tool routing (agent-facing) |
+| `host-agents/claude/hooks/` | Claude hook templates (SessionStart print + Stop/usage flush) |
+| `host-agents/kiro/hooks/` | Kiro CLI hook templates (Stop / SessionEnd / SessionStart usage flush) |
+| `internal/usage/` | Shared queue + `POST /usage` pipeline (hook entrypoint; not listed in user help) |
+| `install.sh` / `install.ps1` | Per-OS installer for the `xdlc` binary |
+| `scripts/smoke_xdlc.py` | Stdlib smoke test against the built binary (fake local backend only) |
+| `aidlc-plugin/` | Separate AI-DLC plugin `techx-dlc` — **not** used by `xdlc` |
 
-The two groups share no files; changes in one do not affect the other.
+User-facing install and commands: **[USER_GUIDE.md](USER_GUIDE.md)**.
+
+## Architecture notes
+
+- One MCP server name: **`xora-dlc`**. Role comes from the logged-in account (AAP), not from per-role MCP names.
+- `xdlc setup` requires login; account role must be enabled in `roles/catalog.yaml`.
+- Host differences are declared in `manifest.yaml` (Kiro vs Claude paths). Claude does not need a marketplace for MCP / skills / hooks.
+- IDE `SKILL.md` files may be hydrated at setup from an AAP allowlist (NL JSON); runtime calls go through `xora_ask`.
+- Bundle on disk after install/update: `~/.xdlc/plugin/` (or `XDLC_PLUGIN_DIR` for local clones).
+- **AI usage (metering):** after setup, host hooks report Claude/Kiro turns to Xora DLC `POST /usage` (tokens / credits, optional agent account email). Convention gov alerts stay on `xdlc sensor report` → `POST /governance/sensor-events`. The hook entrypoint is not part of the user-facing command list in `USER_GUIDE.md`.
+
+## Checks
+
+```bash
+go test ./...
+go build -o xdlc ./cmd/xdlc   # Windows: -o xdlc.exe
+python3 scripts/smoke_xdlc.py
+```
+
+CI (`.github/workflows/xdlc-plugin-tests.yml`) runs `go test`, builds `xdlc`, and runs the smoke script on Ubuntu, macOS, and Windows (Go 1.22; Python 3.12 for smoke only). The Commands fence in `USER_GUIDE.md` must match `xdlc` help output exactly. `install.ps1` must stay ASCII-only.
+
+## Release
+
+1. Bump `VERSION` in `internal/config/config.go` when ready.
+2. Merge to `main`, tag `vX.Y.Z` when cutting a release (`install.sh` / `install.ps1` / `xdlc update` prefer the latest tag).
+
+Dev overrides: `XDLC_REF=<branch>`, `XDLC_PLUGIN_DIR=<clone>`, `XDLC_API_URL` (tests only).

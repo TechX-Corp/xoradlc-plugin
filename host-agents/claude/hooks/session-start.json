@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "xdlc _print __AGENTS_MD__ __MCP_ROUTING_MD__"
+          }
+        ]
+      }
+    ]
+  }
+}

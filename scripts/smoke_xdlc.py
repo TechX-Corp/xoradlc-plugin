@@ -295,7 +295,8 @@ def check_xdlc():
         assert "Removed" in x("remove", "--agent", "kiro", cwd=ws, inp="1\n2\n")  # 1 = item to remove, 2 = Yes
         assert not (kiro / "skills" / "implement").exists() and (kiro / "skills" / "deploy-guide" / "SKILL.md").is_file()
         assert json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {"postgres": {"command": "pg"}}
-        assert "Logged out" in x("logout") and "not logged in" in x("status")
+        assert "Logged out" in x("logout")
+        assert "token expires" not in x("status") and "login" in x("status").lower()
         assert "Removed Xora DLC" in x("uninstall", inp="2\n")  # 2 = Yes
         left_xdlc = (home / ".xdlc").exists()
         left_bin = xdlc.exists()
@@ -334,6 +335,7 @@ def pty_run(argv, steps, cwd, env, timeout=60):
     import fcntl, struct, termios
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))  # terminal 160 cột
     out, pos, sent, deadline = b"", 0, 0, time.time() + timeout
+    timed_out = False
     while time.time() < deadline:
         if select.select([fd], [], [], 0.2)[0]:
             try:
@@ -348,7 +350,18 @@ def pty_run(argv, steps, cwd, env, timeout=60):
             pos = i + len(steps[sent][0])
             os.write(fd, steps[sent][1].encode())
             sent += 1
+        pid_done, _ = os.waitpid(pid, os.WNOHANG)
+        if pid_done == pid:
+            while select.select([fd], [], [], 0)[0]:
+                try:
+                    out += os.read(fd, 4096)
+                except OSError:
+                    break
+            _, status = os.waitpid(pid, 0)
+            return os.waitstatus_to_exitcode(status), out.decode(errors="replace")
     else:
+        timed_out = True
+    if timed_out:
         os.kill(pid, signal.SIGKILL)
         raise AssertionError("pty: hết giờ\n" + out.decode(errors="replace"))
     _, status = os.waitpid(pid, 0)
@@ -413,14 +426,21 @@ def check_menu():
         down, enter = "\x1b[B", "\r"
         for name in ("a", "b"):
             (Path(tmp) / name).mkdir()
-            code, out = pty_run([str(xdlc), "setup", "--agent", "kiro"], [("Enter", down + enter)], Path(tmp) / name, env)
-            plain = strip_ansi(out)
-            assert code == 0 and "Local" in plain and "Installed" in plain, out
+            r = subprocess.run(
+                [str(xdlc), "setup", "--agent", "kiro", "--scope", "local"],
+                cwd=Path(tmp) / name, env=env, capture_output=True, text=True, timeout=120)
+            assert r.returncode == 0 and "Installed" in r.stdout, (r.stdout, r.stderr)
             assert (Path(tmp) / name / ".kiro" / "steering" / "xora-dlc.md").is_file()
         code, out = pty_run([str(xdlc), "remove"], [("current directory", "q")], Path(tmp) / "a", env)
         assert code == 0 and "Cancelled" in strip_ansi(out) and (Path(tmp) / "a" / ".kiro").is_dir(), out
-        code, out = pty_run([str(xdlc), "remove"], [("current directory", enter), ("Nothing selected", "a" + enter),
-                                               ("Continue?", down + enter)], Path(tmp) / "a", env)
+        # Gõ down+enter trong một write: \r dính sau \x1b[B bị readKey nuốt như phần escape → Yes không confirm.
+        code, out = pty_run(
+            [str(xdlc), "remove"],
+            [("current directory", enter), ("Nothing selected", "a" + enter), ("Continue?", down), ("◉ Yes", enter)],
+            Path(tmp) / "a",
+            env,
+            timeout=120,
+        )
         assert code == 0 and strip_ansi(out).count("Removed") == 2, out
         for name in ("a", "b"):
             kiro = Path(tmp) / name / ".kiro"

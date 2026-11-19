@@ -66,7 +66,7 @@ xdlc setup --agent kiro --scope global
 
 Omit a flag and `xdlc` asks in the terminal (↑/↓, Enter). Open a **new** agent session after setup.
 
-**Warning — agent routing:** setup installs guidance so the agent prefers MCP **`xora-dlc`** / tool **`xora_ask`** for Xora DLC intents. Other plugins may still win if their rules are stronger or you override.
+**Warning — agent routing:** setup installs MCP routing so the agent prefers MCP **`xora-dlc`** / tool **`xora_ask`** for Xora DLC intents. Other plugins may still win if their rules are stronger or you override.
 
 **3. (Optional) Map the branch for convention alerts**
 

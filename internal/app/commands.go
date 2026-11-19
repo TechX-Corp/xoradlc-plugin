@@ -17,10 +17,13 @@ import (
 	"github.com/TechX-Corp/xoradlc-plugin/internal/link"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/mcp"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/pack"
+	hostclaude "github.com/TechX-Corp/xoradlc-plugin/host-agents/claude"
+	hostkiro "github.com/TechX-Corp/xoradlc-plugin/host-agents/kiro"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/sensor"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/setup"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/tui"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/update"
+	"github.com/TechX-Corp/xoradlc-plugin/internal/usage"
 )
 
 // Run dispatches argv[0] command with remaining args.
@@ -77,6 +80,11 @@ func Run(argv []string) error {
 		return mcp.Run()
 	case "sensor":
 		return sensor.CmdSensor(rest)
+	case "usage":
+		return usage.CmdUsage(rest, map[string]usage.Host{
+			"claude": hostclaude.Host{},
+			"kiro":   hostkiro.Host{},
+		})
 	case "_print":
 		return update.CmdPrint(rest)
 	case "_reapply":

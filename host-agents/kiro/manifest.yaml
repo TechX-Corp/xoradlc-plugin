@@ -10,11 +10,14 @@ mcp:
 artifacts:
   agents_md: .kiro/steering/xora-dlc.md
   skills_dir: .kiro/skills
+  hooks_dir: .kiro/hooks
 # Shared standards → host paths (setup copies; remove deletes tracked dests)
 standards:
-  - source: GUIDANCE.md
-    dest: .kiro/steering/GUIDANCE.md
-hooks: []
+  - source: MCP_ROUTING.md
+    dest: .kiro/steering/MCP_ROUTING.md
+hooks:
+  - source: hooks/xora-usage-stop.json
+    dest: .kiro/hooks/xora-usage-stop.json
 setup:
   strategy: copy_files
 remove:

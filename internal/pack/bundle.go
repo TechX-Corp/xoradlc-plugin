@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/TechX-Corp/xoradlc-plugin/internal/config"
 	packembed "github.com/TechX-Corp/xoradlc-plugin"
@@ -81,6 +82,10 @@ func copyEmbed(efs fs.FS, dir, dstRoot string) error {
 		target := filepath.Join(dstRoot, filepath.FromSlash(rel))
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
+		}
+		// Never materialize Go sources under host-agents (compiled into xdlc).
+		if strings.HasSuffix(path, ".go") {
+			return nil
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err

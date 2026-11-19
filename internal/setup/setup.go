@@ -19,6 +19,61 @@ import (
 
 var safeSkill = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
+// InstallKiroHooks copies host-agents/kiro hook JSON files into the workspace (.kiro/hooks).
+func InstallKiroHooks(man map[string]any, bundle, base string, files map[string]string) error {
+	for _, h := range manifestHookEntries(man) {
+		src := resolveHostHookFile(bundle, "kiro", h.source)
+		dest := h.dest
+		if dest == "" || dest == "<nil>" {
+			dest = filepath.ToSlash(filepath.Join(".kiro", "hooks", filepath.Base(h.source)))
+		}
+		dest = filepath.ToSlash(dest)
+		b, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(b, &doc); err != nil {
+			return err
+		}
+		// Rewrite command paths to the installed xdlc binary.
+		usageCmd := ShellCmd(append(XdlcArgv(), "usage", "--hook", "kiro"))
+		flushCmd := ShellCmd(append(XdlcArgv(), "usage", "--hook", "kiro", "--flush"))
+		if hooks, ok := doc["hooks"].([]any); ok {
+			for _, item := range hooks {
+				hm, _ := item.(map[string]any)
+				if hm == nil {
+					continue
+				}
+				action, _ := hm["action"].(map[string]any)
+				if action == nil {
+					continue
+				}
+				c, _ := action["command"].(string)
+				if strings.Contains(c, "--flush") {
+					action["command"] = flushCmd
+				} else if strings.Contains(c, "usage") {
+					action["command"] = usageCmd
+				}
+			}
+		}
+		out, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(base, filepath.FromSlash(dest))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, append(out, '\n'), 0o644); err != nil {
+			return err
+		}
+		d, _ := fsutil.SHA256File(dst)
+		files[dest] = d
+	}
+	return nil
+}
+
 // InstallStandards copies manifest standards entries into base.
 func InstallStandards(man map[string]any, bundle, base string, files map[string]string) error {
 	stdSrc := filepath.Join(bundle, "standards")
@@ -46,58 +101,63 @@ func InstallStandards(man map[string]any, bundle, base string, files map[string]
 	return nil
 }
 
-// MergeClaudeHooks merges SessionStart hook from a host template into settings JSON.
-// tmplPath is the absolute path to the hook JSON (from host-agents/claude/manifest.yaml).
-func MergeClaudeHooks(tmplPath, settingsPath, agentsMD, guidanceMD string) error {
-	var hookDoc map[string]any
-	if tmplPath != "" {
-		if b, err := os.ReadFile(tmplPath); err == nil {
-			_ = json.Unmarshal(b, &hookDoc)
-		}
-	}
-	if hookDoc == nil {
-		hookDoc = map[string]any{"hooks": map[string]any{}}
-	}
-	cmd := ShellCmd(append(XdlcArgv(), "_print", agentsMD, guidanceMD))
-	hooksRoot, _ := hookDoc["hooks"].(map[string]any)
-	for _, groups := range hooksRoot {
-		glist, _ := groups.([]any)
-		for _, g := range glist {
-			gm, _ := g.(map[string]any)
-			inner, _ := gm["hooks"].([]any)
-			for _, h := range inner {
-				hm, _ := h.(map[string]any)
-				if _, ok := hm["command"]; ok {
-					hm["command"] = cmd
-				}
-			}
-		}
-	}
+// MergeClaudeHooks merges host-agents/claude hook templates into Claude settings JSON.
+// kind session_start_print → rewrite command to xdlc _print; kind usage → xdlc usage --hook claude.
+func MergeClaudeHooks(man map[string]any, bundle, settingsPath, agentsMD, guidanceMD string) error {
 	var settings map[string]any
 	_ = fsutil.LoadJSON(settingsPath, &settings)
 	if settings == nil {
 		settings = map[string]any{}
 	}
-	hooks := settings
-	if h, ok := settings["hooks"].(map[string]any); ok {
-		hooks = h
-	} else {
-		hooks = map[string]any{}
-		settings["hooks"] = hooks
+	hooksOut, _ := settings["hooks"].(map[string]any)
+	if hooksOut == nil {
+		hooksOut = map[string]any{}
+		settings["hooks"] = hooksOut
 	}
-	srcHooks, _ := hookDoc["hooks"].(map[string]any)
-	if sess, ok := srcHooks["SessionStart"]; ok {
-		hooks["SessionStart"] = sess
-	} else {
-		hooks["SessionStart"] = []any{}
+	printCmd := ShellCmd(append(XdlcArgv(), "_print", agentsMD, guidanceMD))
+	usageCmd := ShellCmd(append(XdlcArgv(), "usage", "--hook", "claude"))
+	usageFlushCmd := ShellCmd(append(XdlcArgv(), "usage", "--hook", "claude", "--flush"))
+
+	for _, item := range manifestHookEntries(man) {
+		path := resolveHostHookFile(bundle, "claude", item.source)
+		doc := loadHookDoc(path)
+		srcHooks, _ := doc["hooks"].(map[string]any)
+		if srcHooks == nil {
+			continue
+		}
+		switch item.kind {
+		case "session_start_print", "":
+			rewriteHookCommands(srcHooks, printCmd)
+			if sess, ok := srcHooks["SessionStart"]; ok {
+				hooksOut["SessionStart"] = sess
+			}
+		case "usage":
+			for ev, groups := range srcHooks {
+				rewriteUsageCommands(groups, usageCmd, usageFlushCmd)
+				if ev == "SessionStart" {
+					// Append usage flush after AGENTS print.
+					existing, _ := hooksOut["SessionStart"].([]any)
+					add, _ := groups.([]any)
+					hooksOut["SessionStart"] = append(existing, add...)
+					continue
+				}
+				hooksOut[ev] = groups
+			}
+		}
 	}
 	return fsutil.SaveJSON(settingsPath, settings, false)
 }
 
-// claudeHookTemplate resolves the first hooks[].source under host-agents/claude/.
-func claudeHookTemplate(man map[string]any, bundle string) string {
-	hooks, _ := man["hooks"].([]any)
-	for _, item := range hooks {
+type hookEntry struct {
+	source string
+	kind   string
+	dest   string
+}
+
+func manifestHookEntries(man map[string]any) []hookEntry {
+	raw, _ := man["hooks"].([]any)
+	var out []hookEntry
+	for _, item := range raw {
 		m, _ := item.(map[string]any)
 		if m == nil {
 			continue
@@ -106,22 +166,77 @@ func claudeHookTemplate(man map[string]any, bundle string) string {
 		if src == "" || src == "<nil>" {
 			continue
 		}
-		rel := filepath.FromSlash(src)
-		if filepath.IsAbs(rel) {
-			return rel
-		}
-		// Prefer paths relative to this host pack; allow legacy repo-root paths too.
-		hostRel := filepath.Join(bundle, "host-agents", "claude", rel)
-		if st, err := os.Stat(hostRel); err == nil && !st.IsDir() {
-			return hostRel
-		}
-		rootRel := filepath.Join(bundle, rel)
-		if st, err := os.Stat(rootRel); err == nil && !st.IsDir() {
-			return rootRel
-		}
+		out = append(out, hookEntry{
+			source: src,
+			kind:   strings.TrimSpace(fmt.Sprint(m["kind"])),
+			dest:   strings.TrimSpace(fmt.Sprint(m["dest"])),
+		})
+	}
+	return out
+}
+
+func resolveHostHookFile(bundle, agent, src string) string {
+	rel := filepath.FromSlash(src)
+	if filepath.IsAbs(rel) {
+		return rel
+	}
+	hostRel := filepath.Join(bundle, "host-agents", agent, rel)
+	if st, err := os.Stat(hostRel); err == nil && !st.IsDir() {
 		return hostRel
 	}
-	return ""
+	return filepath.Join(bundle, rel)
+}
+
+func loadHookDoc(path string) map[string]any {
+	var hookDoc map[string]any
+	if path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			_ = json.Unmarshal(b, &hookDoc)
+		}
+	}
+	if hookDoc == nil {
+		hookDoc = map[string]any{"hooks": map[string]any{}}
+	}
+	return hookDoc
+}
+
+func rewriteHookCommands(hooksRoot map[string]any, cmd string) {
+	for _, groups := range hooksRoot {
+		glist, _ := groups.([]any)
+		for _, g := range glist {
+			gm, _ := g.(map[string]any)
+			inner, _ := gm["hooks"].([]any)
+			for _, h := range inner {
+				hm, _ := h.(map[string]any)
+				if hm == nil {
+					continue
+				}
+				if _, ok := hm["command"]; ok {
+					hm["command"] = cmd
+				}
+			}
+		}
+	}
+}
+
+func rewriteUsageCommands(groups any, usageCmd, flushCmd string) {
+	glist, _ := groups.([]any)
+	for _, g := range glist {
+		gm, _ := g.(map[string]any)
+		inner, _ := gm["hooks"].([]any)
+		for _, h := range inner {
+			hm, _ := h.(map[string]any)
+			if hm == nil {
+				continue
+			}
+			c, _ := hm["command"].(string)
+			if strings.Contains(c, "--flush") {
+				hm["command"] = flushCmd
+			} else {
+				hm["command"] = usageCmd
+			}
+		}
+	}
 }
 
 // Record is persisted via installs package (same JSON shape).
@@ -173,6 +288,9 @@ func SetupKiro(bundle, scope, path string, old *Record, interactive bool, roleID
 	}
 	files[agentsRel] = digest
 	if err := InstallStandards(man, bundle, base, files); err != nil {
+		return Record{}, err
+	}
+	if err := InstallKiroHooks(man, bundle, base, files); err != nil {
 		return Record{}, err
 	}
 	for _, sk := range skills {
@@ -296,7 +414,7 @@ func SetupClaude(bundle, scope, path string, old *Record, interactive bool, role
 	}
 	guidanceRel := ""
 	for _, d := range standardsDests(man) {
-		if strings.Contains(d, "GUIDANCE") {
+		if strings.Contains(d, "MCP_ROUTING") {
 			guidanceRel = d
 			break
 		}
@@ -309,8 +427,7 @@ func SetupClaude(bundle, scope, path string, old *Record, interactive bool, role
 		}
 	}
 	settingsPath := filepath.Join(base, settingsRel)
-	tmpl := claudeHookTemplate(man, bundle)
-	if err := MergeClaudeHooks(tmpl, settingsPath, agentsDst, guidancePath); err != nil {
+	if err := MergeClaudeHooks(man, bundle, settingsPath, agentsDst, guidancePath); err != nil {
 		return Record{}, err
 	}
 	d, _ := fsutil.SHA256File(settingsPath)

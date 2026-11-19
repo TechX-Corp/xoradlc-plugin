@@ -54,7 +54,7 @@ Tool `xora_ask(text, session_id?)` gửi câu hỏi tới Xora DLC như chat tr�
 - **Ghi** (lưu tài liệu vào KB / S3) cũng qua `xora_ask`, chỉ khi người dùng đã xác nhận rõ trong lượt đó.
 - Lỗi / chưa đăng nhập → bảo chạy `xdlc login` / `xdlc status`. `forbidden` → thiếu vai: `xdlc status`, nhờ admin gán vai.
 
-Cũng đọc quy tắc routing MCP chung: `GUIDANCE.md` (file GUIDANCE.md trên máy (cùng session / hook nạp) / được hook SessionStart nạp).
+Cũng đọc quy tắc routing MCP chung: `MCP_ROUTING.md` (file MCP_ROUTING.md trên máy — cùng session / hook nạp / được hook SessionStart nạp).
 
 ## Sensor convention
 
@@ -70,6 +70,10 @@ xdlc sensor report   # gửi findings JSON (stdin) lên Xora DLC (cần xdlc lin
 3. Hỏi: **sửa ngay** hay **vẫn push**.
 4. Vẫn push → `xdlc sensor report` rồi mới commit/push. Chưa map WO → `xdlc link` trước.
 5. Developer tự `git push` trên terminal thì plugin **không** kiểm convention.
+
+## AI usage (metering)
+
+Mức dùng AI (token Claude / credit Kiro) do **hook của host** gửi lên Xora DLC sau mỗi turn — không phải việc của bạn khi commit/push, và **không** dùng `xdlc sensor`. Không bịa số usage, không tự gọi API metering, không nhầm với gov alert convention.
 
 ## Quy ước file hồ sơ changeset
 

@@ -12,7 +12,7 @@ REPO_BIN = ROOT / ("xdlc.exe" if WIN else "xdlc")
 def main():
     # Pack layout: roles / host-agents / standards
     assert (ROOT / "roles" / "catalog.yaml").is_file()
-    assert (ROOT / "standards" / "GUIDANCE.md").is_file()
+    assert (ROOT / "standards" / "MCP_ROUTING.md").is_file()
     assert (ROOT / "host-agents" / "claude" / "hooks" / "session-start.json").is_file()
     for host in ("kiro", "claude"):
         assert (ROOT / "host-agents" / host / "manifest.yaml").is_file(), host
@@ -56,14 +56,14 @@ def _catalog_roles(path):
 
 
 def check_pack():
-    """catalog.yaml maps whoami; manifests name MCP xora-dlc; GUIDANCE in standards."""
+    """catalog.yaml maps whoami; manifests name MCP xora-dlc; MCP_ROUTING in standards."""
     roles = _catalog_roles(ROOT / "roles" / "catalog.yaml")
     assert any(r.get("id") == "dev" and r.get("enabled") for r in roles)
     assert any(r.get("id") == "ba" and not r.get("enabled") for r in roles)
     for host in ("kiro", "claude"):
         text = (ROOT / "host-agents" / host / "manifest.yaml").read_text(encoding="utf-8")
         assert re.search(r"(?m)^\s*name:\s*xora-dlc\s*$", text), host
-    routing = (ROOT / "standards" / "GUIDANCE.md").read_text(encoding="utf-8")
+    routing = (ROOT / "standards" / "MCP_ROUTING.md").read_text(encoding="utf-8")
     assert "xora-dlc" in routing and "xora_ask" in routing
 
 
@@ -174,8 +174,8 @@ def check_xdlc():
             assert os.access(xdlc, os.X_OK) and f"xdlc {version}" in out, out
         assert xdlc.is_file()
         assert "setup" in x() and "uninstall" in x() and "--agent" in x("setup", "--help")
-        readme = (ROOT / "GUIDE.md").read_text(encoding="utf-8").split("```text\n", 1)[1].split("\n```", 1)[0]
-        assert x().rstrip("\n") == readme, "GUIDE.md Commands section must match `xdlc` output exactly"
+        readme = (ROOT / "USER_GUIDE.md").read_text(encoding="utf-8").split("```text\n", 1)[1].split("\n```", 1)[0]
+        assert x().rstrip("\n") == readme, "USER_GUIDE.md Commands section must match `xdlc` output exactly"
         assert "unknown command" in x("nope", ok=False)
         assert "unknown command" in x("use", ok=False)
 
@@ -200,8 +200,9 @@ def check_xdlc():
         assert "Installed" in out and "Warning:" in out and "xora-dlc" in out, out
         kiro = ws / ".kiro"
         assert (kiro / "skills" / "implement" / "SKILL.md").is_file() and (kiro / "steering" / "xora-dlc.md").is_file()
-        assert (kiro / "steering" / "GUIDANCE.md").is_file()
+        assert (kiro / "steering" / "MCP_ROUTING.md").is_file()
         assert not (kiro / "hooks" / "xora-dev-convention-sensor.json").is_file()
+        assert (kiro / "hooks" / "xora-usage-stop.json").is_file()
         servers = json.loads((kiro / "settings" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         entry = servers["xora-dlc"]
         assert servers["postgres"] == {"command": "pg"} and entry["args"][-1] == "mcp"
@@ -284,6 +285,7 @@ def check_xdlc():
         assert sent["session_id"].startswith("agent-push:")
         out = x("setup", "--agent", "kiro", "--scope", "global")
         assert "Installed" in out and not (home / ".kiro" / "hooks" / "xora-dev-convention-sensor.json").is_file(), out
+        assert (home / ".kiro" / "hooks" / "xora-usage-stop.json").is_file(), out
 
         # version, update (từ bản clone), remove, logout, uninstall
         assert f"xdlc {version}" in x("--version") and f"xdlc {version}" in x("-v")
@@ -301,7 +303,8 @@ def check_xdlc():
         left_old = (xdlc.with_suffix(xdlc.suffix + ".old")).exists() if WIN else False
         assert not left_xdlc and not left_bin, f"uninstall leftovers: .xdlc={left_xdlc} bin={left_bin} old={left_old} path={xdlc}"
         assert "xdlc:begin" not in (lr / ".git" / "info" / "exclude").read_text(encoding="utf-8")
-        assert not (pp / ".git" / "hooks" / "pre-push").exists() and not (home / ".kiro" / "hooks").exists()
+        assert not (pp / ".git" / "hooks" / "pre-push").exists()
+        assert not (home / ".kiro" / "hooks" / "xora-usage-stop.json").is_file()
     srv.shutdown()
 
 
@@ -309,9 +312,11 @@ def check_claude_bundle(home, xdlc):
     """host-agents/claude hooks + manifest; marketplace removed."""
     man = (ROOT / "host-agents" / "claude" / "manifest.yaml").read_text(encoding="utf-8")
     assert "xora-dlc" in man and "config_path_local" in man
-    assert "hooks/session-start.json" in man
+    assert "hooks/session-start.json" in man and "hooks/usage.json" in man
     hook = json.loads((ROOT / "host-agents" / "claude" / "hooks" / "session-start.json").read_text(encoding="utf-8"))
     assert "SessionStart" in hook["hooks"]
+    usage = json.loads((ROOT / "host-agents" / "claude" / "hooks" / "usage.json").read_text(encoding="utf-8"))
+    assert "Stop" in usage["hooks"] and "SubagentStop" in usage["hooks"]
 
 
 def strip_ansi(s):

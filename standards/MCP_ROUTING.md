@@ -13,6 +13,7 @@ Other plugins may ship stronger or conflicting routing rules; follow the user's 
 | Internal convention, precedents, error-code catalog, security policy from KB | `xora-dlc` → `xora_ask` |
 | Save a short tech doc to KB / S3 after explicit user confirm | `xora-dlc` → `xora_ask` |
 | Convention check before commit/push the user asked for | Shell: `xdlc sensor` / `xdlc sensor report` (not another MCP) |
+| AI usage / token / credit metering to Xora DLC | Host hooks only (not MCP; do not invent usage numbers or call metering yourself) |
 
 ## Do not use `xora_ask` for
 

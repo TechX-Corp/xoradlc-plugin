@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "xdlc _print __AGENTS_MD__ __GUIDANCE_MD__"
+            "command": "xdlc _print __AGENTS_MD__ __MCP_ROUTING_MD__"
           }
         ]
       }

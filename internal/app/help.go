@@ -6,7 +6,7 @@ import (
 	"github.com/TechX-Corp/xoradlc-plugin/internal/config"
 )
 
-// MainHelp is the top-level xdlc help text (first line used by GUIDE.md).
+// MainHelp is the top-level xdlc help text (first line used by USER_GUIDE.md).
 func MainHelp() string {
 	return fmt.Sprintf(`xdlc %s: Xora DLC for Claude Code and Kiro CLI
 

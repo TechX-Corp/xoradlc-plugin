@@ -16,13 +16,14 @@ artifacts:
   settings_local: .claude/settings.local.json
   settings_global: .claude/settings.json
 standards:
-  - source: GUIDANCE.md
-    dest: .claude/xora-dlc/GUIDANCE.md
+  - source: MCP_ROUTING.md
+    dest: .claude/xora-dlc/MCP_ROUTING.md
 hooks:
   # Relative to this host pack (host-agents/claude/)
   - source: hooks/session-start.json
-    merge_into_local: .claude/settings.local.json
-    merge_into_global: .claude/settings.json
+    kind: session_start_print
+  - source: hooks/usage.json
+    kind: usage
 setup:
   strategy: copy_files
 remove:

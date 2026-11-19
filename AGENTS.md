@@ -29,7 +29,7 @@ xoradlc-plugin/
 ├── AGENTS.md
 ├── USER_GUIDE.md
 ├── README.md
-├── .agents/skills/     # git-*, release, …
+├── .agents/skills/     # git-*, …
 ├── cmd/xdlc/
 ├── internal/
 ├── roles/              # catalog + role AGENTS.md
@@ -54,12 +54,12 @@ Path: `.agents/skills/`
 
 Trước khi implement: check skill khớp task → load và follow. Không load skill không liên quan.
 
-Git / release: dùng skill khớp (`git-commit`, `git-create-pr`, `git-resolve-conflict`, `release`) khi commit / PR / conflict / cắt bản.
+Git / ship: `git-create-pr` (rebase → verify → đề xuất semver → bump commit cuối → PR); `git-commit` / `git-resolve-conflict`.
 
 ## 6. Git
 
 - `BASE_BRANCH`: `main` (user có thể override khi gọi skill / tạo PR)
-- Dùng skill `git-*` / `release` khớp (§5)
+- Dùng skill `git-*` khớp (§5)
 - Không discard uncommitted changes, destructive git, push thẳng protected branch, hay force push — trừ khi user authorize
 - **Commit:** khi user đã yêu cầu commit → làm luôn, không hỏi confirm lại. Prompt không chỉ định file → mặc định `git add .` (vẫn loại secret / `.env` / binary `xdlc`/`xdlc.exe`)
 - **Push / tạo PR / push tag release:** hỏi confirm trừ khi user đã authorize rõ
@@ -75,7 +75,7 @@ python3 scripts/smoke_xdlc.py
 ```
 
 - PR / `BASE_BRANCH` CI: `.github/workflows/xdlc-plugin-tests.yml` (smoke trên ubuntu, macOS, windows).
-- Release: sau **push** lên `BASE_BRANCH`, khi cả **3** smoke xanh → workflow tự tag `v{Version}` (đọc `internal/config/config.go`) nếu tag chưa tồn tại → `.github/workflows/release.yml` cross-compile **6** GOOS/GOARCH assets. Bump `Version` (+ `USER_GUIDE.md` fence) **trong cùng PR** feature; không cần PR bump/tag riêng. Tag tay trên branch khác vẫn bị gate fail. Chi tiết → skill `release`.
+- Release: bump `Version` (+ `USER_GUIDE.md` fence) qua **`git-create-pr`** — commit bump **cuối** (sau rebase/verify, user chốt semver). Merge → smoke ×3 → auto tag `v{Version}` → **6** assets (`release.yml`).
 - `install` / `xdlc update` lấy binary từ GitHub Release — **không** fallback tip of `BASE_BRANCH`.
 - Bump version: `internal/config/config.go` → `Version`; sync fence Commands trong `USER_GUIDE.md` với output `xdlc -h`.
 

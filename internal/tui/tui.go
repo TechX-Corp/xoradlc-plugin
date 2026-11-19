@@ -53,6 +53,15 @@ func Em(text string) string    { return paint(text, 36) }
 func Ok(text string) string    { return paint(text, 32) }
 func Warn(text string) string  { return paint(text, 33) }
 
+// RoleLabel formats a pack or account role id for terminal output (uppercase + accent).
+func RoleLabel(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Dim("no role")
+	}
+	return Em(strings.ToUpper(id))
+}
+
 // ArrowKeys is true when interactive arrow-key menus are available.
 func ArrowKeys() bool {
 	if os.Getenv("XDLC_PLAIN") != "" || os.Getenv("TERM") == "dumb" {

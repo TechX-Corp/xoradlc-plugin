@@ -104,6 +104,12 @@ func cmdSetup(argv []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := pack.EnsureBundle(); err != nil {
+		return err
+	}
+	if err := auth.RequireLoggedIn(); err != nil {
+		return err
+	}
 	agent := opt["agent"]
 	if agent == "" {
 		key, err := tui.Choose("Install for which agent?", []tui.Option{
@@ -142,8 +148,6 @@ func cmdSetup(argv []string) error {
 	if scope == "local" {
 		path = cwd
 	}
-	// Require login/role before any interactive confirm (e.g. local==HOME), so CI/non-TTY
-	// gets a clear "login" error instead of "Need a terminal answer".
 	bundle, err := pack.EnsureBundle()
 	if err != nil {
 		return err
@@ -170,10 +174,9 @@ func cmdSetup(argv []string) error {
 			break
 		}
 	}
-	fmt.Println(tui.Dim(fmt.Sprintf("Role pack: %s (from logged-in account).", tui.Em(roleID))))
-	skills := pack.FetchSkillAllowlist()
+	skills := pack.FetchSkillAllowlist(roleID)
 	if len(skills) > 0 {
-		fmt.Println(tui.Dim(fmt.Sprintf("Hydrating %d skill(s) from AAP allowlist.", len(skills))))
+		fmt.Println(tui.Dim(fmt.Sprintf("Hydrating %d skill(s) for role %s from AAP allowlist.", len(skills), tui.RoleLabel(roleID))))
 	}
 	var rec installs.Record
 	var oldSetup *setup.Record
@@ -213,7 +216,7 @@ func cmdSetup(argv []string) error {
 	}
 	fmt.Println()
 	fmt.Printf("%s %s for %s: %s · role %s\n", verb, tui.Em("xora-dlc"), tui.Em(config.Agents[agent]),
-		strings.TrimSpace(installs.Label(rec)), tui.Em(roleID))
+		strings.TrimSpace(installs.Label(rec)), tui.RoleLabel(roleID))
 	fmt.Println(tui.Warn("Warning:") + tui.Dim(fmt.Sprintf(" setup adds agent instructions that prefer MCP %s / %s for Xora DLC "+
 		"(shared context, work orders, KB). Other plugins may still win if their routing is stronger "+
 		"or the user overrides. Open a new agent session after setup.", tui.Em("xora-dlc"), tui.Em("xora_ask"))))

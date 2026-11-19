@@ -48,13 +48,12 @@ func ParseSkillAllowlist(text string) ([]Skill, error) {
 			}
 		}
 	}
-	start := strings.Index(s, "[")
-	end := strings.LastIndex(s, "]")
-	if start < 0 || end <= start {
-		return nil, fmt.Errorf("no JSON array")
+	jsonArr, err := firstJSONArray(s)
+	if err != nil {
+		return nil, err
 	}
 	var data []map[string]any
-	if err := json.Unmarshal([]byte(s[start:end+1]), &data); err != nil {
+	if err := json.Unmarshal([]byte(jsonArr), &data); err != nil {
 		return nil, err
 	}
 	var out []Skill
@@ -75,16 +74,59 @@ func ParseSkillAllowlist(text string) ([]Skill, error) {
 	return out, nil
 }
 
+func firstJSONArray(s string) (string, error) {
+	start := strings.Index(s, "[")
+	if start < 0 {
+		return "", fmt.Errorf("no JSON array")
+	}
+	depth := 0
+	inString := false
+	escape := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escape {
+				escape = false
+				continue
+			}
+			if c == '\\' {
+				escape = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return s[start : i+1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("unclosed JSON array")
+}
+
+func skillAllowlistNote(roleID, detail string) {
+	fmt.Println(tui.Dim(fmt.Sprintf("Skill allowlist for role %s: %s, continuing without SKILL.md files.", tui.RoleLabel(roleID), detail)))
+}
+
 // FetchSkillAllowlist loads skills from AAP; soft-fails to empty slice.
-func FetchSkillAllowlist() []Skill {
+func FetchSkillAllowlist(roleID string) []Skill {
 	text, err := api.AskAAP(skillAllowlistPrompt, 90*time.Second)
 	if err != nil {
-		fmt.Println(tui.Warn("Skill allowlist:") + tui.Dim(fmt.Sprintf(" could not load from AAP (%v); continuing without SKILL.md files.", err)))
+		skillAllowlistNote(roleID, "could not load from AAP")
 		return nil
 	}
 	skills, err := ParseSkillAllowlist(text)
 	if err != nil {
-		fmt.Println(tui.Warn("Skill allowlist:") + tui.Dim(fmt.Sprintf(" could not parse AAP response (%v); continuing without SKILL.md files.", err)))
+		skillAllowlistNote(roleID, "could not parse AAP response")
 		return nil
 	}
 	return skills

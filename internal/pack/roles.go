@@ -73,9 +73,9 @@ func ResolveRolePack(bundle string) (roleID string, agentsPath string, err error
 			return "", "", err
 		}
 	}
-	u, why := auth.Whoami()
+	u, _ := auth.Whoami()
 	if u == nil {
-		return "", "", cli.Usage(fmt.Sprintf("Setup requires login: %s. Run %s first.", why, tui.Em("xdlc login")))
+		return "", "", cli.Fail(auth.NotLoggedInMsg)
 	}
 	raw := strings.TrimSpace(fmt.Sprint(u["role"]))
 	if raw == "" {
@@ -114,9 +114,13 @@ func ResolveRolePack(bundle string) (roleID string, agentsPath string, err error
 			enabled = append(enabled, r.ID)
 		}
 	}
+	enabledDisp := make([]string, len(enabled))
+	for i, id := range enabled {
+		enabledDisp[i] = strings.ToUpper(id)
+	}
 	return "", "", cli.Fail(fmt.Sprintf(
 		"Account role %s is not enabled in this plugin.\n  Enabled role ids: %s\n  Edit roles/catalog.yaml (whoami_roles) or use an account with an enabled role.",
-		tui.Em(raw), strings.Join(enabled, ", ")))
+		tui.RoleLabel(raw), strings.Join(enabledDisp, ", ")))
 }
 
 func lowerAll(in []string) []string {

@@ -179,8 +179,10 @@ def check_xdlc():
         assert "unknown command" in x("nope", ok=False)
         assert "unknown command" in x("use", ok=False)
 
-        # login first (setup requires logged-in enabled role)
-        assert "login" in x("setup", "--agent", "kiro", "--scope", "local", cwd=home, ok=False).lower()
+        # login first (setup requires logged-in enabled role). Use a non-home cwd so we don't
+        # hit the "install in HOME?" confirm before the login gate (macOS /var vs /private/var).
+        proj = Path(tmp) / "proj"; proj.mkdir()
+        assert "login" in x("setup", "--agent", "kiro", "--scope", "local", cwd=proj, ok=False).lower()
         lp = subprocess.Popen([str(xdlc), "login"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True, encoding="utf-8")
         url = next(l for l in lp.stdout if l.startswith("http"))

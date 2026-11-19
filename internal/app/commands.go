@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -133,7 +134,17 @@ func cmdSetup(argv []string) error {
 	if scope == "local" {
 		path = cwd
 	}
-	if scope == "local" && path == config.Home() {
+	// Require login/role before any interactive confirm (e.g. local==HOME), so CI/non-TTY
+	// gets a clear "login" error instead of "Need a terminal answer".
+	bundle, err := pack.EnsureBundle()
+	if err != nil {
+		return err
+	}
+	roleID, agentsSrc, err := pack.ResolveRolePack(bundle)
+	if err != nil {
+		return err
+	}
+	if scope == "local" && samePath(path, config.Home()) {
 		ok, err := tui.Confirm(fmt.Sprintf("Current directory is your home (%s), not a project. Install anyway?", fsutil.Short(cwd)))
 		if err != nil {
 			return err
@@ -150,14 +161,6 @@ func cmdSetup(argv []string) error {
 			old = &items[i]
 			break
 		}
-	}
-	bundle, err := pack.EnsureBundle()
-	if err != nil {
-		return err
-	}
-	roleID, agentsSrc, err := pack.ResolveRolePack(bundle)
-	if err != nil {
-		return err
 	}
 	fmt.Println(tui.Dim(fmt.Sprintf("Role pack: %s (from logged-in account).", tui.Em(roleID))))
 	skills := pack.FetchSkillAllowlist()
@@ -430,6 +433,20 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func samePath(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil {
+		ra = a
+	}
+	if errB != nil {
+		rb = b
+	}
+	ra, _ = filepath.Abs(ra)
+	rb, _ = filepath.Abs(rb)
+	return filepath.Clean(ra) == filepath.Clean(rb)
 }
 
 func normalizeArgv(argv []string) []string {

@@ -1,5 +1,6 @@
 # Build multi-OS xdlc binaries and publish a GitHub Release when a v* tag is pushed.
-# Tags must point at a commit on BASE_BRANCH (see AGENTS.md); otherwise this job fails before build.
+# Tags are usually created by the tag-release job in xdlc-plugin-tests.yml after main smoke passes.
+# Manual tags must point at a commit on BASE_BRANCH (see AGENTS.md); otherwise this job fails before build.
 name: release
 
 on:

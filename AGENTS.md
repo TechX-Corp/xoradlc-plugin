@@ -75,7 +75,7 @@ python3 scripts/smoke_xdlc.py
 ```
 
 - PR / `BASE_BRANCH` CI: `.github/workflows/xdlc-plugin-tests.yml` (smoke trên ubuntu, macOS, windows).
-- Release: chỉ khi push tag `v*` → `.github/workflows/release.yml` cross-compile **6** GOOS/GOARCH assets (darwin/linux/windows × amd64/arm64). Job **fail sớm** nếu tagged commit không nằm trên lịch sử `BASE_BRANCH`. Chi tiết → skill `release`.
+- Release: sau **push** lên `BASE_BRANCH`, khi cả **3** smoke xanh → workflow tự tag `v{Version}` (đọc `internal/config/config.go`) nếu tag chưa tồn tại → `.github/workflows/release.yml` cross-compile **6** GOOS/GOARCH assets. Bump `Version` (+ `USER_GUIDE.md` fence) **trong cùng PR** feature; không cần PR bump/tag riêng. Tag tay trên branch khác vẫn bị gate fail. Chi tiết → skill `release`.
 - `install` / `xdlc update` lấy binary từ GitHub Release — **không** fallback tip of `BASE_BRANCH`.
 - Bump version: `internal/config/config.go` → `Version`; sync fence Commands trong `USER_GUIDE.md` với output `xdlc -h`.
 

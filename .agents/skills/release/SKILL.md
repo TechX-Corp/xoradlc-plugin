@@ -4,7 +4,8 @@ description: >-
   Cut an xoradlc-plugin GitHub Release for the Go xdlc CLI: bump version,
   sync docs, verify CI, tag vX.Y.Z, and confirm multi-OS release assets.
   Use when the user asks to release, cut a version, tag a release, publish
-  xdlc, or ship install/update binaries. Do not auto-tag on every BASE_BRANCH merge.
+  xdlc, or ship install/update binaries. After merge to BASE_BRANCH, CI auto-tags
+  when Version is new.
 ---
 
 # Release (xoradlc-plugin)
@@ -29,8 +30,8 @@ Below, **BASE_BRANCH** means that resolved name.
 
 ## Non-goals
 
-- Do **not** create a tag on every merge to **BASE_BRANCH**.
 - Do **not** delete a tag/release that users may already have installed.
+- Do **not** merge to **BASE_BRANCH** without bumping `Version` when you intend to ship binaries (merge with unchanged version skips tag; merge with duplicate semver **fails** CI).
 - Do **not** publish by uploading binaries manually unless CI is broken and the user explicitly asks.
 - Dev-only installs (`XDLC_PLUGIN_DIR`, local `go build`) are **not** a release.
 
@@ -40,7 +41,8 @@ Below, **BASE_BRANCH** means that resolved name.
 |---|---|
 | `internal/config/config.go` → `Version` | Semver string embedded in the binary (`xdlc --version`, help) |
 | `USER_GUIDE.md` Commands fence | Must match `xdlc` / `xdlc -h` output **exactly** (includes version on line 1) |
-| `.github/workflows/xdlc-plugin-tests.yml` | PR / **BASE_BRANCH**: `go test` → build → `scripts/smoke_xdlc.py` (**3** runners: ubuntu, macOS, windows) |
+| `.github/workflows/xdlc-plugin-tests.yml` | PR / **BASE_BRANCH**: `go test` → build → `scripts/smoke_xdlc.py` (**3** runners). On **push** to **BASE_BRANCH** only: job `tag-release` after all smokes green |
+| `tag-release` job | Reads `Version` → push annotated tag `vX.Y.Z` on merge commit if tag missing; skip if tag already on same commit; **fail** if tag exists on another commit |
 | `.github/workflows/release.yml` | On push tag `v*`: cross-compile **6** GOOS/GOARCH binaries + upload Release |
 | Release matrix | **3 OS × 2 arch = 6 assets**: `darwin`/`linux`/`windows` × `amd64`/`arm64` |
 | Asset names | `xdlc-darwin-amd64`, `xdlc-darwin-arm64`, `xdlc-linux-amd64`, `xdlc-linux-arm64`, `xdlc-windows-amd64.exe`, `xdlc-windows-arm64.exe` |
@@ -55,7 +57,7 @@ Do not confuse **smoke CI (3 OS runners)** with **release binaries (6 GOOS/GOARC
 
 1. Read current `Version` in `internal/config/config.go`.
 2. Propose the next version using **Version bump rules** below (patch / minor / major) from the change set since the last release tag.
-3. **Stop and ask the user** to chốt (accept / change) the proposed `Version` and tag `vX.Y.Z` before bumping files, committing, or tagging. Do not proceed past this gate without an explicit OK.
+3. **Stop and ask the user** to chốt (accept / change) the proposed `Version` before bumping files in the PR. Tag `vX.Y.Z` is created automatically after merge; no manual tag step unless recovering from CI failure.
 4. Confirm **BASE_BRANCH** (from `AGENTS.md` / user override).
 5. Stop if working tree has unrelated dirty changes the user did not ask to include.
 
@@ -86,9 +88,9 @@ go build -o xdlc ./cmd/xdlc   # Windows: -o xdlc.exe
 python3 scripts/smoke_xdlc.py
 ```
 
-3. If a PR is open, wait until **ubuntu / macOS / Windows** smoke jobs are green before tagging.
+3. If a PR is open, wait until **ubuntu / macOS / Windows** smoke jobs are green before merge.
 
-### 2. Bump version
+### 2. Bump version (same PR as the feature)
 
 1. Set `Version` in `internal/config/config.go` to the new semver **without** the `v` prefix (e.g. `"0.2.2"`).
 2. Sync `USER_GUIDE.md` Commands fence first line to:
@@ -106,19 +108,22 @@ go build -o xdlc ./cmd/xdlc
 ```
 
 3. Grep for the **old** version string; update any leftover user-facing copies (help is driven by `config.Version` — fence is the usual drift).
-4. Commit the bump (invoke `git-commit` or equivalent). Message example: `chore(xdlc): bump version to 0.2.2`.
+4. Include the bump in the **same PR** as the feature (or a dedicated ship PR); avoid a second PR only for version.
 
-### 3. Land on BASE_BRANCH
+### 3. Merge to BASE_BRANCH
 
-1. If not already on **BASE_BRANCH**: open/merge PR into **BASE_BRANCH** (`git-create-pr` if needed).
-2. Do **not** tag from a feature branch that is not yet on **BASE_BRANCH** unless the user explicitly wants a pre-release from that commit.
-3. After merge: `git checkout <BASE_BRANCH> && git pull`.
+1. Open/merge PR into **BASE_BRANCH** (`git-create-pr` if needed) once PR smokes are green.
+2. Do **not** push release tags from feature branches — manual tags off **BASE_BRANCH** still hit the gate in `release.yml` and should be avoided.
+3. After merge, CI on **BASE_BRANCH** re-runs smoke ×3, then `tag-release` pushes `v{Version}` when that tag does not exist yet.
 
-### 4. Tag and push
+### 4. Auto-tag (CI) — manual only for recovery
 
-Only after **BASE_BRANCH** contains the version bump and CI on **BASE_BRANCH**/PR was green:
+Normal path: **no human tag**. The `tag-release` job pushes `vX.Y.Z` on the merge commit.
+
+Manual tag (recovery only, after **BASE_BRANCH** already has the bump and user authorized):
 
 ```bash
+git checkout <BASE_BRANCH> && git pull
 git tag vX.Y.Z          # must match Version, with leading v
 git push origin vX.Y.Z
 ```
@@ -126,9 +131,8 @@ git push origin vX.Y.Z
 Rules:
 
 - Tag format: `v` + three numeric components (`v1.2.3`).
-- Tag the commit that has the bumped `Version`.
-- Ask before `git push` of the tag unless the user already authorized push/release.
 - Never `git push --force` a release tag.
+- Ask before manual `git push` of a tag unless the user already authorized.
 
 ### 5. Watch release CI
 
@@ -168,12 +172,12 @@ xdlc --version   # expect new Version
 
 ## Rules
 
-- One human decision to ship → one `vX.Y.Z` tag → CI publishes **6** assets.
-- Always propose a version from the bump rules and **get user confirmation** before bump / tag / push.
+- One merge PR with bumped `Version` → smoke on **BASE_BRANCH** → auto `vX.Y.Z` → CI publishes **6** assets.
+- Always propose a version from the bump rules and **get user confirmation** before bump in the PR.
 - `Version` in code and tag semver must match (`0.2.2` ↔ `v0.2.2`).
 - Never claim a release succeeded without checking the Release assets (or the workflow conclusion).
-- Never auto-tag from routine PR merges into **BASE_BRANCH**.
-- Prefer tagging the release commit **on BASE_BRANCH**; tags off-branch fail the release workflow gate (see below).
+- Merges without a new `Version` do not create a new tag (existing tag unchanged); intentional doc-only merges stay tag-free.
+- Tags off **BASE_BRANCH** still fail the release workflow gate (see below).
 - Dev overrides (`XDLC_PLUGIN_DIR`, `XDLC_REF`, `XDLC_API_URL`) are for local/CI tests, not for end users.
 
 ## Tag from a non-BASE_BRANCH commit
@@ -187,4 +191,4 @@ So if someone tags a feature-branch commit and pushes `vX.Y.Z`:
 
 `env.BASE_BRANCH` in `release.yml` must stay in sync with `BASE_BRANCH` in root `AGENTS.md`.
 
-Default policy: merge to **BASE_BRANCH** first, then tag.
+Default policy: bump `Version` in the PR, merge to **BASE_BRANCH**; CI tags and releases.

@@ -40,6 +40,6 @@ CI (`.github/workflows/xdlc-plugin-tests.yml`) runs `go test`, builds `xdlc`, an
 ## Release
 
 1. Bump `VERSION` in `internal/config/config.go` when ready.
-2. Merge to `main`, tag `vX.Y.Z` when cutting a release (`install.sh` / `install.ps1` / `xdlc update` prefer the latest tag).
+2. Merge to `main` with `Version` bumped in `internal/config/config.go` — CI smoke on three OS, then auto-tags `vX.Y.Z` and publishes Release assets (`install.sh` / `install.ps1` / `xdlc update` use the latest release).
 
 Dev overrides: `XDLC_REF=<branch>`, `XDLC_PLUGIN_DIR=<clone>`, `XDLC_API_URL` (tests only).

@@ -1,5 +1,6 @@
 # Build multi-OS xdlc binaries and publish a GitHub Release when a v* tag is pushed.
-# Tags are usually created by the tag-release job in xdlc-plugin-tests.yml after main smoke passes.
+# Manual or bot tag pushes (non-GITHUB_TOKEN) can still trigger this workflow.
+# Normal ship path: tag-release + publish-release jobs in xdlc-plugin-tests.yml (Actions tag push does not chain here).
 # Manual tags must point at a commit on BASE_BRANCH (see AGENTS.md); otherwise this job fails before build.
 name: release
 

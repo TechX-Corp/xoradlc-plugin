@@ -75,7 +75,7 @@ python3 scripts/smoke_xdlc.py
 ```
 
 - PR / `BASE_BRANCH` CI: `.github/workflows/xdlc-plugin-tests.yml` (smoke trên ubuntu, macOS, windows).
-- Release: bump `Version` (+ `USER_GUIDE.md` fence) qua **`git-create-pr`** — commit bump **cuối** (sau rebase/verify, user chốt semver). Merge → smoke ×3 → auto tag `v{Version}` → **6** assets (`release.yml`).
+- Release: bump qua **`git-create-pr`** → merge → smoke ×3 → `tag-release` + `publish-release` (6 assets). Tag push bằng `GITHUB_TOKEN` không kích `release.yml`; publish nằm trong smoke workflow. Tag tay vẫn có thể kích `release.yml`.
 - `install` / `xdlc update` lấy binary từ GitHub Release — **không** fallback tip of `BASE_BRANCH`.
 - Bump version: `internal/config/config.go` → `Version`; sync fence Commands trong `USER_GUIDE.md` với output `xdlc -h`.
 

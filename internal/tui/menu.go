@@ -87,17 +87,18 @@ func Menu(title string, labels []string, multi bool) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		_ = raw.Close()
+	clearMenu := func() {
 		_, _ = fmt.Fprint(out, fmt.Sprintf("\x1b[%dA\x1b[J\x1b[?25h", menuLines))
 		_ = out.Sync()
-	}()
+	}
+	defer func() { _ = raw.Close() }()
 
 	var result []int
 	draw(true)
 	for result == nil {
 		k, err := readKey(raw)
 		if err != nil {
+			clearMenu()
 			return nil, err
 		}
 		hint = nil
@@ -139,16 +140,18 @@ func Menu(title string, labels []string, multi bool) ([]int, error) {
 				hint = &h
 			}
 		case "esc":
+			drainStdin()
+			clearMenu()
 			return nil, cli.Cancel("Cancelled.")
 		}
 		if result == nil {
 			draw(false)
 		}
 	}
+	clearMenu()
 	for _, i := range result {
-		fmt.Printf("  › %s\n", Bold(labels[i]))
+		_, _ = fmt.Fprintf(out, "\r\x1b[2K  › %s\n", Bold(labels[i]))
 	}
-	// Callers often Println next; ensure cursor is on a fresh line after raw-mode redraw.
 	_, _ = fmt.Fprint(out, "\r\x1b[2K\n")
 	_ = out.Sync()
 	return result, nil

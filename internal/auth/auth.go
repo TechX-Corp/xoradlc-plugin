@@ -243,14 +243,11 @@ func StoreGranted(granted map[string]any) (*AuthTokens, error) {
 
 // RequireLoggedIn fails with a friendly message when there is no session.
 func RequireLoggedIn() error {
-	u, why := Whoami()
+	u, _ := Whoami()
 	if u != nil {
 		return nil
 	}
-	if why == "" {
-		why = NotLoggedInHint()
-	}
-	return cli.Fail(why)
+	return cli.Fail(NotLoggedInHint())
 }
 
 // FinishLogin validates post-login output (optional helper for cmd layer).

@@ -97,6 +97,15 @@ func stepLabel(s step) string {
 	return fmt.Sprintf("%s · %s · %s", s["work_order_id"], wn, sn)
 }
 
+// MappingLabel returns the linked work-order line for repo/branch, or "" when unmapped.
+func MappingLabel(repoID, branch string) string {
+	st, ok := LinkOf(repoID, branch)
+	if !ok {
+		return ""
+	}
+	return stepLabel(st)
+}
+
 // CmdLink implements xdlc link.
 func CmdLink(argv []string) error {
 	argv = longOpts(argv)

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	Version  = "0.3.2"
+	Version  = "0.3.3"
 	Repo     = "TechX-Corp/xoradlc-plugin"
 	ProdURL  = "https://xoradlc-platform-api.techxcorp.com"
 	ClientID = "xora-plugin"

@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-
+	"unicode/utf8"
 )
 
 var (
@@ -22,13 +22,19 @@ func ColorEnabled() bool {
 	return colorCache
 }
 
+func terminalCharDevice(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
+}
+
 func probeColor() {
 	if os.Getenv("NO_COLOR") != "" || os.Getenv("XDLC_PLAIN") != "" || os.Getenv("TERM") == "dumb" {
 		colorCache = false
 		return
 	}
-	fi, err := os.Stdout.Stat()
-	if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
+	stdoutTTY := terminalCharDevice(os.Stdout)
+	stderrTTY := terminalCharDevice(os.Stderr)
+	if !stdoutTTY && !stderrTTY {
 		colorCache = false
 		return
 	}
@@ -125,14 +131,50 @@ func PrintHelp(text string, w io.Writer) {
 	_ = out.Flush()
 }
 
-// PrintTable prints a bordered table (ASCII when plain).
+var ansiStrip = regexp.MustCompile(`\x1b\[[0-9;]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)`)
+
+func stripANSI(s string) string {
+	return ansiStrip.ReplaceAllString(s, "")
+}
+
+func visibleLen(s string) int {
+	return utf8.RuneCountInString(stripANSI(s))
+}
+
+func formatTableCell(text string, width int) string {
+	vis := visibleLen(text)
+	pad := width - vis
+	if pad < 0 {
+		pad = 0
+	}
+	return " " + text + strings.Repeat(" ", pad) + " "
+}
+
+func tableCellLines(cell string) []string {
+	if cell == "" {
+		return []string{""}
+	}
+	return strings.Split(cell, "\n")
+}
+
+func tableCellWidth(cell string) int {
+	w := 0
+	for _, ln := range tableCellLines(cell) {
+		if n := visibleLen(ln); n > w {
+			w = n
+		}
+	}
+	return w
+}
+
+// PrintTable prints a bordered table (ASCII when plain). Cells may use "\n" for stacked lines.
 func PrintTable(headers []string, rows [][]string, indent string) {
 	if indent == "" {
 		indent = "  "
 	}
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = visibleLen(h)
 	}
 	data := make([][]string, len(rows))
 	for ri, row := range rows {
@@ -143,8 +185,8 @@ func PrintTable(headers []string, rows [][]string, indent string) {
 				cell = row[i]
 			}
 			line[i] = cell
-			if len(cell) > widths[i] {
-				widths[i] = len(cell)
+			if cw := tableCellWidth(cell); cw > widths[i] {
+				widths[i] = cw
 			}
 		}
 		data[ri] = line
@@ -169,15 +211,39 @@ func PrintTable(headers []string, rows [][]string, indent string) {
 	rowLine := func(cells []string) string {
 		parts := make([]string, len(cells))
 		for i, c := range cells {
-			parts[i] = fmt.Sprintf(" %-*s ", widths[i], c)
+			parts[i] = formatTableCell(c, widths[i])
 		}
 		return indent + v + strings.Join(parts, v) + v
+	}
+	printRow := func(cells []string) {
+		height := 1
+		lines := make([][]string, len(cells))
+		for i, cell := range cells {
+			lines[i] = tableCellLines(cell)
+			if len(lines[i]) > height {
+				height = len(lines[i])
+			}
+		}
+		for li := 0; li < height; li++ {
+			parts := make([]string, len(cells))
+			for i := range cells {
+				text := ""
+				if li < len(lines[i]) {
+					text = lines[i][li]
+				}
+				parts[i] = formatTableCell(text, widths[i])
+			}
+			fmt.Println(indent + v + strings.Join(parts, v) + v)
+		}
 	}
 	fmt.Println(border(tl, t, tr, h))
 	fmt.Println(rowLine(headers))
 	fmt.Println(border(l, x, r, h))
-	for _, row := range data {
-		fmt.Println(rowLine(row))
+	for i, row := range data {
+		printRow(row)
+		if i < len(data)-1 {
+			fmt.Println(border(l, x, r, h))
+		}
 	}
 	fmt.Println(border(bl, b, br, h))
 }

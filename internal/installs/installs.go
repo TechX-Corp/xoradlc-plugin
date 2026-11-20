@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/TechX-Corp/xoradlc-plugin/internal/cli"
 	"github.com/TechX-Corp/xoradlc-plugin/internal/config"
@@ -16,6 +17,8 @@ import (
 
 // Record is one agent setup persisted in installs.json.
 type Record struct {
+	ID             string            `json:"id,omitempty"`
+	UpdatedAt      int64             `json:"updated_at,omitempty"`
 	Agent          string            `json:"agent"`
 	Scope          string            `json:"scope"`
 	Path           string            `json:"path"`
@@ -37,15 +40,20 @@ func path() string {
 	return filepath.Join(config.XDLC(), "installs.json")
 }
 
-// Load returns saved install records.
+// Load returns saved install records (assigns setup ids when missing).
 func Load() []Record {
 	var f file
 	_ = fsutil.LoadJSON(path(), &f)
-	return f.Installs
+	items, changed := ensureIDs(f.Installs)
+	if changed {
+		_ = Save(items)
+	}
+	return items
 }
 
 // Save writes install records.
 func Save(items []Record) error {
+	items, _ = ensureIDs(items)
 	return fsutil.SaveJSON(path(), file{Version: config.Version, Installs: items}, true)
 }
 
@@ -101,10 +109,10 @@ func Reapply(items []Record, interactive bool) error {
 		switch r.Agent {
 		case "kiro":
 			sr, err := setup.SetupKiro(bundle, r.Scope, r.Path, &old, interactive, roleID, agentsSrc, nil)
-			newRec, setupErr = fromSetupRecord(sr), err
+			newRec, setupErr = fromSetupRecord(sr, r), err
 		case "claude":
 			sr, err := setup.SetupClaude(bundle, r.Scope, r.Path, &old, interactive, roleID, agentsSrc, nil)
-			newRec, setupErr = fromSetupRecord(sr), err
+			newRec, setupErr = fromSetupRecord(sr, r), err
 		default:
 			setupErr = cli.Fail("unknown agent " + r.Agent)
 		}
@@ -113,6 +121,7 @@ func Reapply(items []Record, interactive bool) error {
 			done = append(done, r)
 			continue
 		}
+		newRec.UpdatedAt = time.Now().Unix()
 		done = append(done, newRec)
 		fmt.Printf("  %s %s\n", tui.Ok("Updated"), strings.TrimSpace(Label(r)))
 	}
@@ -132,8 +141,9 @@ func toSetupRecord(r Record) setup.Record {
 	}
 }
 
-func fromSetupRecord(r setup.Record) Record {
+func fromSetupRecord(r setup.Record, prev Record) Record {
 	return Record{
+		ID: prev.ID, UpdatedAt: prev.UpdatedAt,
 		Agent: r.Agent, Scope: r.Scope, Path: r.Path, Version: r.Version, Role: r.Role,
 		Files: r.Files, McpJSON: r.McpJSON, CreatedMcpJSON: r.CreatedMcpJSON,
 		GitTracked: r.GitTracked, SettingsRel: r.SettingsRel,

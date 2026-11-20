@@ -48,6 +48,37 @@ func (r *rawTerm) Close() error {
 	return term.Restore(r.fd, r.old)
 }
 
+func stdinQueued(r keyReader) []byte {
+	_ = os.Stdin.SetReadDeadline(time.Now())
+	defer func() { _ = os.Stdin.SetReadDeadline(time.Time{}) }()
+	buf := make([]byte, 32)
+	n, err := r.Read(buf)
+	if err != nil || n == 0 {
+		return nil
+	}
+	return buf[:n]
+}
+
+func parseEscSuffix(buf []byte) string {
+	if len(buf) >= 2 && buf[0] == '[' {
+		switch buf[1] {
+		case 'A':
+			return "up"
+		case 'B':
+			return "down"
+		}
+	}
+	if len(buf) >= 2 && buf[0] == 'O' {
+		switch buf[1] {
+		case 'A':
+			return "up"
+		case 'B':
+			return "down"
+		}
+	}
+	return "esc"
+}
+
 func readKey(r keyReader) (string, error) {
 	buf := make([]byte, 1)
 	n, err := r.Read(buf)
@@ -69,57 +100,7 @@ func readKey(r keyReader) (string, error) {
 	case 'q', 4:
 		return "esc", nil
 	case 27:
-		// Lone Esc is 0x1b only. Arrows are ESC [ A/B — peek quickly so Esc cancel is instant.
-		defer func() { _ = os.Stdin.SetReadDeadline(time.Time{}) }()
-		_ = os.Stdin.SetReadDeadline(time.Now().Add(3 * time.Millisecond))
-		rest := make([]byte, 8)
-		n, err := r.Read(rest)
-		if err != nil || n == 0 {
-			return "esc", nil
-		}
-		if rest[0] != '[' && rest[0] != 'O' {
-			return "esc", nil
-		}
-		if rest[0] == '[' && n >= 2 {
-			switch rest[1] {
-			case 'A':
-				return "up", nil
-			case 'B':
-				return "down", nil
-			}
-		}
-		if rest[0] == 'O' && n >= 2 {
-			switch rest[1] {
-			case 'A':
-				return "up", nil
-			case 'B':
-				return "down", nil
-			}
-		}
-		if n == 1 {
-			_ = os.Stdin.SetReadDeadline(time.Now().Add(25 * time.Millisecond))
-			more := make([]byte, 2)
-			n2, err2 := r.Read(more)
-			if err2 == nil && n2 > 0 {
-				switch rest[0] {
-				case '[':
-					switch more[0] {
-					case 'A':
-						return "up", nil
-					case 'B':
-						return "down", nil
-					}
-				case 'O':
-					switch more[0] {
-					case 'A':
-						return "up", nil
-					case 'B':
-						return "down", nil
-					}
-				}
-			}
-		}
-		return "esc", nil
+		return readAfterEsc(r), nil
 	default:
 		return "", nil
 	}

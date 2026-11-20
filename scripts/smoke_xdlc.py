@@ -255,7 +255,7 @@ def check_xdlc():
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "xora_ask", "arguments": {"text": "Việc của tôi?"}}})) + "\n"
         st = x("status")
-        assert "Dat Dev" in st and "Backend" not in st and "Agent" in st and "Scope" in st and st.count("Kiro") == 4, st
+        assert "Dat Dev" in st and "Backend" not in st and "Agent" in st and "Scope" in st and "Details:" in st and "xdlc view" in st and st.count("Kiro") == 4, st
         resp = {r["id"]: r for r in map(json.loads, x("mcp", inp=mcp_in).splitlines())}
         assert resp[3]["result"]["content"][0]["text"] == "Việc của bạn: WO-1", resp[3]
         assert any(m.get("method") == "tools/call" and m["params"]["name"] == "xora_ask" for m in seen["mcp"]), seen
@@ -268,11 +268,11 @@ def check_xdlc():
         g(pp, "add", "."); g(pp, "commit", "-qm", "init")
         out = x("setup", "--agent", "kiro", "--scope", "local", cwd=pp)
         assert "Installed" in out and not (pp / ".git" / "hooks" / "pre-push").exists(), out
-        assert "WO-1 --step impl" in x("link", "-l", cwd=pp) and "no work order mapped" in x("status", cwd=pp)
+        assert "WO-1 --step impl" in x("link", "-l", cwd=pp) and "no work order mapped" in x("link", "-l", cwd=pp)
         assert "Mapped branch main → WO-1" in x("link", cwd=pp, inp="1\n")
         assert "Mapped branch main → WO-2" in x("link", "WO-2", "-t", "impl", "-b", "main", cwd=pp)
         assert "is not among" in x("link", "WO-9", cwd=pp, ok=False)
-        assert "(was: WO-2)" in x("link", "wo-1", cwd=pp) and "WO-1 · Tích hợp eKYC" in x("status", cwd=pp)
+        assert "(was: WO-2)" in x("link", "wo-1", cwd=pp) and "WO-1 · Tích hợp eKYC" in x("link", "-l", cwd=pp)
         (pp / "A.java").write_text('class A { void a(){ System.out.println("x"); } }\n', encoding="utf-8")
         sens = x("sensor", cwd=pp)
         assert "CONVENTION_NL_BODY" in sens and "A.java" in sens, sens

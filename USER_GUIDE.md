@@ -83,7 +83,7 @@ xdlc link
 ## Commands
 
 ```text
-xdlc 0.3.2: Xora DLC for Claude Code and Kiro CLI
+xdlc 0.3.3: Xora DLC for Claude Code and Kiro CLI
 
 Usage: xdlc <command> [options]
 
@@ -93,7 +93,8 @@ Commands:
   link       Map the current branch to a work order (for agent convention alerts)
   login      Log in to Xora DLC
   logout     Log out of Xora DLC on this machine
-  status     Signed-in account and role, and where setup is installed
+  status     Signed-in account and setups (short id per row)
+  view       Show one setup by id from status
   update     Update xdlc and the plugin to the latest release
   uninstall  Remove Xora DLC entirely from this machine
 

@@ -18,7 +18,8 @@ Commands:
   link       Map the current branch to a work order (for agent convention alerts)
   login      Log in to Xora DLC
   logout     Log out of Xora DLC on this machine
-  status     Signed-in account and role, and where setup is installed
+  status     Signed-in account and setups (short id per row)
+  view       Show one setup by id from status
   update     Update xdlc and the plugin to the latest release
   uninstall  Remove Xora DLC entirely from this machine
 
@@ -66,7 +67,10 @@ If the browser is already signed in on the web, that account is used: xdlc print
 Deletes the Xora DLC token from this machine.`,
 		"status": `xdlc status
 
-Prints version, signed-in account and role, and setups.`,
+Prints version, signed-in account, and a short setups table (agent, scope, id).`,
+		"view": `xdlc view <id>
+
+Shows repository, branch, work-order map, and last update for one setup id from xdlc status.`,
 		"update": `xdlc update
 
 Downloads the latest GitHub release (tag vX.Y.Z newer than the installed version), replaces the xdlc

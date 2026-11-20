@@ -72,6 +72,8 @@ func Run(argv []string) error {
 		return auth.LogoutCommand(rest)
 	case "status":
 		return cmdStatus(rest)
+	case "view":
+		return cmdView(rest)
 	case "update":
 		return update.CmdUpdate(rest)
 	case "uninstall":
@@ -206,6 +208,12 @@ func cmdSetup(argv []string) error {
 		if !installs.Same(r, rec) {
 			newItems = append(newItems, r)
 		}
+	}
+	rec.UpdatedAt = time.Now().Unix()
+	if old != nil {
+		rec.ID = old.ID
+	} else {
+		rec.ID = installs.NewID(items)
 	}
 	newItems = append(newItems, rec)
 	if err := installs.Save(newItems); err != nil {
@@ -358,18 +366,6 @@ func cmdStatus(argv []string) error {
 		fmt.Printf("%s %s\n", tui.Bold("Account:"), why)
 	}
 	cwd, _ := os.Getwd()
-	if root := gitx.GitRoot(cwd); root != "" {
-		fmt.Println()
-		branch := gitx.GitOut(root, "branch", "--show-current")
-		repoID, _ := gitx.RepoIdentity(root)
-		cur, ok := link.LinkOf(repoID, branch)
-		mapped := tui.Dim("no work order mapped")
-		if ok {
-			mapped = fmt.Sprintf("%s · %s · %s", cur["work_order_id"], cur["work_order_name"], cur["step_name"])
-		}
-		fmt.Printf("%s %s · %s → %s\n", tui.Bold("Current repo:"), tui.Em(repoID), tui.Em(branch), mapped)
-		fmt.Println(tui.Dim(fmt.Sprintf("  Convention alerts on commit/push — %s, map with %s.", tui.Em("xdlc sensor"), tui.Em("xdlc link"))))
-	}
 	fmt.Println()
 	items := installs.Load()
 	if len(items) == 0 {
@@ -379,13 +375,10 @@ func cmdStatus(argv []string) error {
 		var rows [][]string
 		for _, r := range items {
 			agent := strings.Split(config.Agents[r.Agent], " ")[0]
-			scope := config.ScopeName[r.Scope]
-			if r.Scope != "global" {
-				scope = scope + "  " + fsutil.Short(r.Path)
-			}
-			rows = append(rows, []string{agent, scope})
+			rows = append(rows, []string{tui.Em(r.ID), agent, setupScopeCell(r, cwd)})
 		}
-		tui.PrintTable([]string{"Agent", "Scope"}, rows, "  ")
+		tui.PrintTable([]string{"ID", "Agent", "Scope"}, rows, "  ")
+		fmt.Println(tui.Dim("Details: ") + tui.Em("xdlc view <id>"))
 	}
 	return nil
 }
@@ -459,6 +452,57 @@ func samePath(a, b string) bool {
 	ra, _ = filepath.Abs(ra)
 	rb, _ = filepath.Abs(rb)
 	return filepath.Clean(ra) == filepath.Clean(rb)
+}
+
+// cwdUnderSetup is true when cwd is the install root or inside a local setup tree.
+func setupScopeCell(r installs.Record, cwd string) string {
+	scope := config.ScopeName[r.Scope]
+	if scope == "" {
+		scope = r.Scope
+	}
+	if r.Scope == "global" {
+		return scope + "\n" + tui.Dim("all repositories on this machine")
+	}
+	line2 := fsutil.Short(r.Path)
+	if cwdUnderSetup(r.Path, cwd) {
+		line2 += " (current repo)"
+	}
+	return scope + "\n" + tui.Dim(line2)
+}
+
+func repositoryID(root string) string {
+	id, origin := gitx.RepoIdentity(root)
+	if id != "" && !strings.HasPrefix(id, "path:") {
+		return id
+	}
+	if origin != "" {
+		if short := gitx.NormalizeRemote(origin); short != "" {
+			return short
+		}
+		return origin
+	}
+	return fsutil.Short(root)
+}
+
+func cwdUnderSetup(setupRoot, cwd string) bool {
+	if samePath(setupRoot, cwd) {
+		return true
+	}
+	root, errR := filepath.EvalSymlinks(setupRoot)
+	cwdAbs, errC := filepath.EvalSymlinks(cwd)
+	if errR != nil {
+		root = setupRoot
+	}
+	if errC != nil {
+		cwdAbs = cwd
+	}
+	root, _ = filepath.Abs(root)
+	cwdAbs, _ = filepath.Abs(cwdAbs)
+	rel, err := filepath.Rel(root, cwdAbs)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func normalizeArgv(argv []string) []string {

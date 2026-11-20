@@ -24,8 +24,13 @@ type AuthTokens struct {
 
 var tokenMu sync.Mutex
 
-// NotLoggedInMsg is the user-facing hint when OAuth session is missing.
+// NotLoggedInMsg is the plain hint (status, logs) when OAuth session is missing.
 const NotLoggedInMsg = "Not logged in. Run xdlc login first."
+
+// NotLoggedInHint is for terminal stderr (emphasizes the login command).
+func NotLoggedInHint() string {
+	return "Not logged in. Run " + tui.Em("xdlc login") + " first."
+}
 
 func authPath() string {
 	return filepath.Join(config.XDLC(), "auth.json")
@@ -243,7 +248,7 @@ func RequireLoggedIn() error {
 		return nil
 	}
 	if why == "" {
-		why = NotLoggedInMsg
+		why = NotLoggedInHint()
 	}
 	return cli.Fail(why)
 }

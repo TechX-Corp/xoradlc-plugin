@@ -69,27 +69,54 @@ func readKey(r keyReader) (string, error) {
 	case 'q', 4:
 		return "esc", nil
 	case 27:
-		// Lone Esc is a single byte; arrow keys are Esc + "[A" etc. Do not block waiting for a sequence.
-		_ = os.Stdin.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+		// Lone Esc is 0x1b only. Arrows are ESC [ A/B — peek quickly so Esc cancel is instant.
 		defer func() { _ = os.Stdin.SetReadDeadline(time.Time{}) }()
-		seq := make([]byte, 3)
-		n, err := r.Read(seq)
+		_ = os.Stdin.SetReadDeadline(time.Now().Add(3 * time.Millisecond))
+		rest := make([]byte, 8)
+		n, err := r.Read(rest)
 		if err != nil || n == 0 {
 			return "esc", nil
 		}
-		if seq[0] == '[' {
-			switch {
-			case n >= 2 && seq[1] == 'A':
+		if rest[0] != '[' && rest[0] != 'O' {
+			return "esc", nil
+		}
+		if rest[0] == '[' && n >= 2 {
+			switch rest[1] {
+			case 'A':
 				return "up", nil
-			case n >= 2 && seq[1] == 'B':
+			case 'B':
 				return "down", nil
 			}
-		} else if seq[0] == 'O' {
-			switch {
-			case n >= 2 && seq[1] == 'A':
+		}
+		if rest[0] == 'O' && n >= 2 {
+			switch rest[1] {
+			case 'A':
 				return "up", nil
-			case n >= 2 && seq[1] == 'B':
+			case 'B':
 				return "down", nil
+			}
+		}
+		if n == 1 {
+			_ = os.Stdin.SetReadDeadline(time.Now().Add(25 * time.Millisecond))
+			more := make([]byte, 2)
+			n2, err2 := r.Read(more)
+			if err2 == nil && n2 > 0 {
+				switch rest[0] {
+				case '[':
+					switch more[0] {
+					case 'A':
+						return "up", nil
+					case 'B':
+						return "down", nil
+					}
+				case 'O':
+					switch more[0] {
+					case 'A':
+						return "up", nil
+					case 'B':
+						return "down", nil
+					}
+				}
 			}
 		}
 		return "esc", nil

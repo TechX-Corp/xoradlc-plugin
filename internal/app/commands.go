@@ -174,9 +174,10 @@ func cmdSetup(argv []string) error {
 			break
 		}
 	}
+	fmt.Println(tui.Dim("Loading skill allowlist from AAP (may take up to a minute)…"))
 	skills := pack.FetchSkillAllowlist(roleID)
 	if len(skills) > 0 {
-		fmt.Println(tui.Dim(fmt.Sprintf("Hydrating %d skill(s) for role %s from AAP allowlist.", len(skills), tui.RoleLabel(roleID))))
+		fmt.Println(tui.Dim(fmt.Sprintf("Installing %d skill(s) for role %s.", len(skills), tui.RoleLabel(roleID))))
 	}
 	var rec installs.Record
 	var oldSetup *setup.Record

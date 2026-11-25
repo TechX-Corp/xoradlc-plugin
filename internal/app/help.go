@@ -28,30 +28,30 @@ Options:
   -h, --help     This command list
 
 Shortcuts (skip terminal prompts):
-  xdlc setup -a, --agent kiro|claude  -s, --scope global|local
+  xdlc setup -a, --agent kiro|claude
   xdlc remove -a, --agent kiro|claude
   xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]
 
-Scope: global = every repo on this machine; local = current project, git does not track xdlc files.
+Setup installs into the current project; git does not track xdlc files.
 For details on one command: xdlc <command> --help`, config.Version)
 }
 
 // CmdHelp returns per-command help.
 func CmdHelp(cmd string) (string, bool) {
 	m := map[string]string{
-		"setup": fmt.Sprintf(`xdlc setup [-a, --agent kiro|claude] [-s, --scope global|local]
+		"setup": fmt.Sprintf(`xdlc setup [-a, --agent kiro|claude]
 
-Install the xora-dlc pack (AGENTS.md for the logged-in role, standards, MCP, optional AAP skills).
+Install the xora-dlc pack (AGENTS.md for the logged-in role, standards, MCP, optional AAP skills)
+into the current project (cwd, not your home directory); git does not track xdlc files.
 Requires xdlc login; account role must be enabled in roles/catalog.yaml.
-If --agent / --scope are missing, prompts on the terminal. Scope:
-  global  every repo on this machine
-  local   current project (cwd); git does not track xdlc files
+If --agent is missing, prompts on the terminal.
 Convention checks run in the agent on commit/push (xdlc sensor + AAP), not in git pre-push.`),
 		"remove": `xdlc remove [-a, --agent kiro|claude]
 
 Pick setups to remove: ↑/↓ move, Space select, a select all, Enter confirm
 (no terminal: type 1,3 | 1-2 | all). Only deletes files xdlc installed;
-asks first if you edited a file. In mcp.json, only removes the xora-dlc block.`,
+asks first if you edited a file. In mcp.json, only removes the xora-dlc block;
+in Claude settings, only removes the xdlc hooks.`,
 		"link": `xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]
 
 Map the repo's current branch (identified by origin URL) to a step you are working on in Xora DLC,
@@ -67,7 +67,7 @@ If the browser is already signed in on the web, that account is used: xdlc print
 Deletes the Xora DLC token from this machine.`,
 		"status": `xdlc status
 
-Prints version, signed-in account, and a short setups table (agent, scope, id).`,
+Prints version, signed-in account, and a short setups table (id, agent, project).`,
 		"view": `xdlc view <id>
 
 Shows repository, branch, work-order map, and last update for one setup id from xdlc status.`,

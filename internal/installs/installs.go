@@ -64,15 +64,10 @@ func Label(rec Record) string {
 		agent = rec.Agent
 	}
 	first := strings.Split(agent, " ")[0]
-	scope := config.ScopeName[rec.Scope]
-	if scope == "" {
-		scope = rec.Scope
+	if rec.Scope == config.ScopeGlobal {
+		return fmt.Sprintf("%-7s Global (legacy)", first)
 	}
-	where := ""
-	if rec.Scope != "global" {
-		where = "  " + fsutil.Short(rec.Path)
-	}
-	return fmt.Sprintf("%-7s %-7s%s", first, scope, where)
+	return fmt.Sprintf("%-7s %s", first, fsutil.Short(rec.Path))
 }
 
 // Same reports whether two records identify the same setup slot.
@@ -88,12 +83,20 @@ func Reapply(items []Record, interactive bool) error {
 	}
 	done := make([]Record, 0, len(items))
 	for _, r := range items {
-		if r.Scope != "global" {
-			if st, err := os.Stat(r.Path); err != nil || !st.IsDir() {
-				fmt.Println(tui.Dim(fmt.Sprintf("  Skipping %s: directory no longer exists.", strings.TrimSpace(Label(r)))))
+		if r.Scope == config.ScopeGlobal {
+			if err := removeLegacyGlobal(r); err != nil {
+				fmt.Printf("  %s removing %s: %v\n", tui.Warn("Error"), strings.TrimSpace(Label(r)), err)
 				done = append(done, r)
 				continue
 			}
+			fmt.Printf("  %s %s %s\n", tui.Ok("Removed"), strings.TrimSpace(Label(r)),
+				tui.Dim("(global setups are no longer supported; run xdlc setup inside each project)"))
+			continue
+		}
+		if st, err := os.Stat(r.Path); err != nil || !st.IsDir() {
+			fmt.Println(tui.Dim(fmt.Sprintf("  Skipping %s: directory no longer exists.", strings.TrimSpace(Label(r)))))
+			done = append(done, r)
+			continue
 		}
 		roleID := r.Role
 		if roleID == "" {
@@ -108,10 +111,10 @@ func Reapply(items []Record, interactive bool) error {
 		old := toSetupRecord(r)
 		switch r.Agent {
 		case "kiro":
-			sr, err := setup.SetupKiro(bundle, r.Scope, r.Path, &old, interactive, roleID, agentsSrc, nil)
+			sr, err := setup.SetupKiro(bundle, r.Path, &old, interactive, roleID, agentsSrc, nil)
 			newRec, setupErr = fromSetupRecord(sr, r), err
 		case "claude":
-			sr, err := setup.SetupClaude(bundle, r.Scope, r.Path, &old, interactive, roleID, agentsSrc, nil)
+			sr, err := setup.SetupClaude(bundle, r.Path, &old, interactive, roleID, agentsSrc, nil)
 			newRec, setupErr = fromSetupRecord(sr, r), err
 		default:
 			setupErr = cli.Fail("unknown agent " + r.Agent)
@@ -126,6 +129,18 @@ func Reapply(items []Record, interactive bool) error {
 		fmt.Printf("  %s %s\n", tui.Ok("Updated"), strings.TrimSpace(Label(r)))
 	}
 	return Save(done)
+}
+
+// removeLegacyGlobal uninstalls a pre-0.4.0 global setup without prompting: files the user edited stay.
+func removeLegacyGlobal(r Record) error {
+	sr := toSetupRecord(r)
+	switch r.Agent {
+	case "kiro":
+		return setup.RemoveKiro(sr, false)
+	case "claude":
+		return setup.RemoveClaude(sr, false)
+	}
+	return cli.Fail("unknown agent " + r.Agent)
 }
 
 // ToSetupRecord converts a persisted record for setup package.

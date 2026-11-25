@@ -118,6 +118,7 @@ func MergeClaudeHooks(man map[string]any, bundle, settingsPath, agentsMD, guidan
 	usageCmd := ShellCmd(append(XdlcArgv(), "usage", "--hook", "claude"))
 	usageFlushCmd := ShellCmd(append(XdlcArgv(), "usage", "--hook", "claude", "--flush"))
 
+	add := map[string][]any{}
 	for _, item := range manifestHookEntries(man) {
 		path := resolveHostHookFile(bundle, "claude", item.source)
 		doc := loadHookDoc(path)
@@ -128,24 +129,106 @@ func MergeClaudeHooks(man map[string]any, bundle, settingsPath, agentsMD, guidan
 		switch item.kind {
 		case "session_start_print", "":
 			rewriteHookCommands(srcHooks, printCmd)
-			if sess, ok := srcHooks["SessionStart"]; ok {
-				hooksOut["SessionStart"] = sess
+			if sess, ok := srcHooks["SessionStart"].([]any); ok {
+				add["SessionStart"] = append(add["SessionStart"], sess...)
 			}
 		case "usage":
 			for ev, groups := range srcHooks {
 				rewriteUsageCommands(groups, usageCmd, usageFlushCmd)
-				if ev == "SessionStart" {
-					// Append usage flush after AGENTS print.
-					existing, _ := hooksOut["SessionStart"].([]any)
-					add, _ := groups.([]any)
-					hooksOut["SessionStart"] = append(existing, add...)
-					continue
-				}
-				hooksOut[ev] = groups
+				g, _ := groups.([]any)
+				add[ev] = append(add[ev], g...)
 			}
 		}
 	}
+	// Keep the user's own hooks; replace only xdlc's so re-running setup stays idempotent.
+	for ev, groups := range hooksOut {
+		if _, ok := groups.([]any); !ok {
+			continue
+		}
+		kept := withoutXdlcHooks(groups)
+		if len(kept) == 0 {
+			delete(hooksOut, ev)
+			continue
+		}
+		hooksOut[ev] = kept
+	}
+	for ev, groups := range add {
+		existing, _ := hooksOut[ev].([]any)
+		hooksOut[ev] = append(existing, groups...)
+	}
 	return fsutil.SaveJSON(settingsPath, settings, false)
+}
+
+func isClaudeSettings(rel, settingsRel string) bool {
+	rel = filepath.ToSlash(rel)
+	if settingsRel != "" {
+		return rel == filepath.ToSlash(settingsRel)
+	}
+	return rel == ".claude/settings.json" || rel == ".claude/settings.local.json"
+}
+
+// StripClaudeHooks removes xdlc hooks from a Claude settings file; deletes it only if nothing else is left.
+func StripClaudeHooks(settingsPath string) error {
+	var settings map[string]any
+	if err := fsutil.LoadJSON(settingsPath, &settings); err != nil || settings == nil {
+		return nil
+	}
+	if hooks, ok := settings["hooks"].(map[string]any); ok {
+		for ev, groups := range hooks {
+			if _, ok := groups.([]any); !ok {
+				continue
+			}
+			if kept := withoutXdlcHooks(groups); len(kept) > 0 {
+				hooks[ev] = kept
+			} else {
+				delete(hooks, ev)
+			}
+		}
+		if len(hooks) == 0 {
+			delete(settings, "hooks")
+		}
+	}
+	if len(settings) == 0 {
+		return os.Remove(settingsPath)
+	}
+	return fsutil.SaveJSON(settingsPath, settings, false)
+}
+
+func isXdlcHookCommand(c string) bool {
+	return strings.Contains(c, " usage --hook claude") || strings.Contains(c, " _print ")
+}
+
+// withoutXdlcHooks drops xdlc commands from Claude hook groups, and groups left empty.
+func withoutXdlcHooks(groups any) []any {
+	glist, _ := groups.([]any)
+	var out []any
+	for _, g := range glist {
+		gm, _ := g.(map[string]any)
+		if gm == nil {
+			out = append(out, g)
+			continue
+		}
+		inner, ok := gm["hooks"].([]any)
+		if !ok {
+			out = append(out, g)
+			continue
+		}
+		var keep []any
+		for _, h := range inner {
+			hm, _ := h.(map[string]any)
+			c, _ := hm["command"].(string)
+			if hm != nil && isXdlcHookCommand(c) {
+				continue
+			}
+			keep = append(keep, h)
+		}
+		if len(keep) == 0 {
+			continue
+		}
+		gm["hooks"] = keep
+		out = append(out, gm)
+	}
+	return out
 }
 
 type hookEntry struct {
@@ -254,7 +337,7 @@ type Record struct {
 }
 
 // SetupKiro installs the Kiro pack.
-func SetupKiro(bundle, scope, path string, old *Record, interactive bool, roleID, agentsSrc string, skills []pack.Skill) (Record, error) {
+func SetupKiro(bundle, path string, old *Record, interactive bool, roleID, agentsSrc string, skills []pack.Skill) (Record, error) {
 	man, err := pack.HostManifest("kiro", bundle)
 	if err != nil {
 		return Record{}, err
@@ -271,12 +354,9 @@ func SetupKiro(bundle, scope, path string, old *Record, interactive bool, roleID
 	if old != nil {
 		oldMap = recordToMap(old)
 	}
-	gitChoice, err := gitx.LocalGit(base, plan, oldMap, scope == "local" && interactive)
+	gitChoice, err := gitx.LocalGit(base, plan, oldMap, interactive)
 	if err != nil {
 		return Record{}, err
-	}
-	if scope != "local" {
-		gitChoice = ""
 	}
 	files := map[string]string{}
 	agentsRel = filepath.ToSlash(agentsRel)
@@ -328,26 +408,24 @@ func SetupKiro(bundle, scope, path string, old *Record, interactive bool, roleID
 		return Record{}, err
 	}
 	rec := Record{
-		Agent: "kiro", Scope: scope, Path: base, Version: config.Version, Role: roleID,
+		Agent: "kiro", Scope: config.ScopeLocal, Path: base, Version: config.Version, Role: roleID,
 		Files: files, McpJSON: mcpRel, CreatedMcpJSON: created, GitTracked: gitChoice,
 	}
-	if scope == "local" {
-		excluded := []string{}
-		for rel := range files {
-			if gitChoice != "keep" || len(gitx.GitTracked(base, []string{rel})) == 0 {
-				excluded = append(excluded, rel)
-			}
+	excluded := []string{}
+	for rel := range files {
+		if gitChoice != "keep" || len(gitx.GitTracked(base, []string{rel})) == 0 {
+			excluded = append(excluded, rel)
 		}
-		if created || gitChoice == "untrack" {
-			excluded = append(excluded, mcpRel)
-		}
-		_ = gitx.SetExclude(base, excluded)
 	}
+	if created || gitChoice == "untrack" {
+		excluded = append(excluded, mcpRel)
+	}
+	_ = gitx.SetExclude(base, excluded)
 	return rec, nil
 }
 
 // SetupClaude installs the Claude Code pack.
-func SetupClaude(bundle, scope, path string, old *Record, interactive bool, roleID, agentsSrc string, skills []pack.Skill) (Record, error) {
+func SetupClaude(bundle, path string, old *Record, interactive bool, roleID, agentsSrc string, skills []pack.Skill) (Record, error) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return Record{}, cli.Fail("Command 'claude' not found. Install Claude Code first: https://code.claude.com")
 	}
@@ -355,35 +433,20 @@ func SetupClaude(bundle, scope, path string, old *Record, interactive bool, role
 	if err != nil {
 		return Record{}, err
 	}
-	base := config.Home()
-	if scope == "local" {
-		base = path
-	}
-	mcpRel := nestedString(man, "mcp", "config_path_global")
-	if scope == "local" {
-		mcpRel = nestedString(man, "mcp", "config_path_local")
-	}
+	base := path
+	mcpRel := nestedString(man, "mcp", "config_path_local")
 	mcpPath := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(mcpRel, "./")))
-	if scope == "global" && mcpRel == ".claude.json" {
-		mcpPath = filepath.Join(config.Home(), ".claude.json")
-	}
 	agentsRel := nestedString(man, "artifacts", "agents_md")
 	skillsRel := nestedString(man, "artifacts", "skills_dir")
-	settingsRel := nestedString(man, "artifacts", "settings_global")
-	if scope == "local" {
-		settingsRel = nestedString(man, "artifacts", "settings_local")
-	}
+	settingsRel := nestedString(man, "artifacts", "settings_local")
 	plan := []string{settingsRel, mcpRel, agentsRel}
 	var oldMap map[string]any
 	if old != nil {
 		oldMap = recordToMap(old)
 	}
-	gitChoice, err := gitx.LocalGit(base, plan, oldMap, scope == "local" && interactive)
+	gitChoice, err := gitx.LocalGit(base, plan, oldMap, interactive)
 	if err != nil {
 		return Record{}, err
-	}
-	if scope != "local" {
-		gitChoice = ""
 	}
 	files := map[string]string{}
 	agentsDst := filepath.Join(base, agentsRel)
@@ -451,11 +514,11 @@ func SetupClaude(bundle, scope, path string, old *Record, interactive bool, role
 			}
 		}
 	}
-	if scope == "local" && gitChoice != "keep" {
+	if gitChoice != "keep" {
 		_ = gitx.SetExclude(base, []string{settingsRel, mcpRel})
 	}
 	return Record{
-		Agent: "claude", Scope: scope, Path: base, Version: config.Version, Role: roleID,
+		Agent: "claude", Scope: config.ScopeLocal, Path: base, Version: config.Version, Role: roleID,
 		Files: files, McpJSON: mcpTrack, CreatedMcpJSON: created, GitTracked: gitChoice, SettingsRel: settingsRel,
 	}, nil
 }
@@ -497,16 +560,24 @@ func RemoveKiro(rec Record, interactive bool) error {
 // RemoveClaude removes a Claude setup.
 func RemoveClaude(rec Record, interactive bool) error {
 	base := rec.Path
-	for rel, digest := range rec.Files {
-		p := filepath.Join(base, rel)
+	abs := func(rel string) string {
 		if filepath.IsAbs(rel) {
-			p = rel
+			return rel
+		}
+		return filepath.Join(base, rel)
+	}
+	mcp := abs(rec.McpJSON)
+	for rel, digest := range rec.Files {
+		p := abs(rel)
+		// Settings and MCP config also hold the user's own entries: strip ours, never delete the file.
+		if p == mcp {
+			continue
+		}
+		if isClaudeSettings(rel, rec.SettingsRel) {
+			_ = StripClaudeHooks(p)
+			continue
 		}
 		removeFilePath(p, digest, interactive)
-	}
-	mcp := rec.McpJSON
-	if !filepath.IsAbs(mcp) {
-		mcp = filepath.Join(base, mcp)
 	}
 	_ = StripMcpConfig(mcp, rec.CreatedMcpJSON)
 	if rec.Scope == "local" {

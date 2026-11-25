@@ -102,7 +102,7 @@ func Run(argv []string) error {
 }
 
 func cmdSetup(argv []string) error {
-	opt, err := parseOptions(argv, "agent", "scope")
+	opt, err := parseOptions(argv, "agent")
 	if err != nil {
 		return err
 	}
@@ -134,21 +134,10 @@ func cmdSetup(argv []string) error {
 				tui.Em("Kiro"), tui.Em("Kiro CLI"))))
 		}
 	}
-	cwd, _ := os.Getwd()
-	scope := opt["scope"]
-	if scope == "" {
-		key, err := tui.Choose(fmt.Sprintf("Where to install for %s?", config.Agents[agent]), []tui.Option{
-			{Key: "global", Label: "Global  every repo on this machine"},
-			{Key: "local", Label: "Local   current project (" + fsutil.Short(cwd) + "); git does not track xdlc files"},
-		})
-		if err != nil {
-			return err
-		}
-		scope = key
-	}
-	path := config.Home()
-	if scope == "local" {
-		path = cwd
+	path, _ := os.Getwd()
+	if samePath(path, config.Home()) {
+		// The agents read ~/.kiro and ~/.claude as machine-wide config: installing here would be global.
+		return cli.Usage(fmt.Sprintf("Current directory is your home (%s), not a project. cd into a project directory and run xdlc setup again.", fsutil.Short(path)))
 	}
 	bundle, err := pack.EnsureBundle()
 	if err != nil {
@@ -158,16 +147,7 @@ func cmdSetup(argv []string) error {
 	if err != nil {
 		return err
 	}
-	if scope == "local" && samePath(path, config.Home()) {
-		ok, err := tui.Confirm(fmt.Sprintf("Current directory is your home (%s), not a project. Install anyway?", fsutil.Short(cwd)))
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return cli.Cancel("Cancelled. cd into a project directory and run again.")
-		}
-	}
-	slot := installs.Record{Agent: agent, Scope: scope, Path: path}
+	slot := installs.Record{Agent: agent, Scope: config.ScopeLocal, Path: path}
 	items := installs.Load()
 	var old *installs.Record
 	for i := range items {
@@ -189,13 +169,13 @@ func cmdSetup(argv []string) error {
 	}
 	switch agent {
 	case "kiro":
-		sr, err := setup.SetupKiro(bundle, scope, path, oldSetup, true, roleID, agentsSrc, skills)
+		sr, err := setup.SetupKiro(bundle, path, oldSetup, true, roleID, agentsSrc, skills)
 		if err != nil {
 			return err
 		}
 		rec = fromSetup(sr)
 	case "claude":
-		sr, err := setup.SetupClaude(bundle, scope, path, oldSetup, true, roleID, agentsSrc, skills)
+		sr, err := setup.SetupClaude(bundle, path, oldSetup, true, roleID, agentsSrc, skills)
 		if err != nil {
 			return err
 		}
@@ -273,7 +253,7 @@ func cmdRemove(argv []string) error {
 		labels := make([]string, len(cands))
 		for i, r := range cands {
 			labels[i] = installs.Label(r)
-			if r.Scope != "global" && r.Path == cwd {
+			if r.Scope != config.ScopeGlobal && r.Path == cwd {
 				labels[i] += "   ← current directory"
 			}
 		}
@@ -375,9 +355,9 @@ func cmdStatus(argv []string) error {
 		var rows [][]string
 		for _, r := range items {
 			agent := strings.Split(config.Agents[r.Agent], " ")[0]
-			rows = append(rows, []string{tui.Em(r.ID), agent, setupScopeCell(r, cwd)})
+			rows = append(rows, []string{tui.Em(r.ID), agent, setupProjectCell(r, cwd)})
 		}
-		tui.PrintTable([]string{"ID", "Agent", "Scope"}, rows, "  ")
+		tui.PrintTable([]string{"ID", "Agent", "Project"}, rows, "  ")
 		fmt.Println(tui.Dim("Details: ") + tui.Em("xdlc view <id>"))
 	}
 	return nil
@@ -391,14 +371,13 @@ func fromSetup(r setup.Record) installs.Record {
 	}
 }
 
-var shortFlags = map[string]string{"-a": "agent", "-s": "scope"}
+var shortFlags = map[string]string{"-a": "agent"}
 
 func parseOptions(argv []string, allowed ...string) (map[string]string, error) {
 	argv = normalizeArgv(argv)
 	allow := map[string]struct{}{}
 	vals := map[string][]string{
 		"agent": config.AgentKeys(),
-		"scope": {"global", "local"},
 	}
 	for _, a := range allowed {
 		allow[a] = struct{}{}
@@ -455,19 +434,15 @@ func samePath(a, b string) bool {
 }
 
 // cwdUnderSetup is true when cwd is the install root or inside a local setup tree.
-func setupScopeCell(r installs.Record, cwd string) string {
-	scope := config.ScopeName[r.Scope]
-	if scope == "" {
-		scope = r.Scope
+func setupProjectCell(r installs.Record, cwd string) string {
+	if r.Scope == config.ScopeGlobal {
+		return "Global (legacy)\n" + tui.Dim("removed on xdlc update")
 	}
-	if r.Scope == "global" {
-		return scope + "\n" + tui.Dim("all repositories on this machine")
-	}
-	line2 := fsutil.Short(r.Path)
+	cell := fsutil.Short(r.Path)
 	if cwdUnderSetup(r.Path, cwd) {
-		line2 += " (current repo)"
+		cell += tui.Dim(" (current repo)")
 	}
-	return scope + "\n" + tui.Dim(line2)
+	return cell
 }
 
 func repositoryID(root string) string {
@@ -506,7 +481,7 @@ func cwdUnderSetup(setupRoot, cwd string) bool {
 }
 
 func normalizeArgv(argv []string) []string {
-	short := map[string]string{"-a": "--agent", "-s": "--scope"}
+	short := map[string]string{"-a": "--agent"}
 	var out []string
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]

@@ -19,7 +19,8 @@ func (Host) Tool() string { return usage.ToolKiro }
 func (Host) AgentEmail() *string { return AgentEmail() }
 
 // ParseNew reads messages.jsonl (or resolves sess dir). afterTurnID is last sent turnId.
-// transcriptPath from hook may be session dir, messages.jsonl, or empty (then flush-only).
+// transcriptPath from hook may be session dir, messages.jsonl, or empty (Kiro V3 sends none:
+// the session is found under ~/.kiro/sessions by id).
 func (Host) ParseNew(sessionID, transcriptPath string, subagent bool, afterTurnID string) ([]usage.Record, string, error) {
 	path := resolveMessages(transcriptPath, sessionID)
 	if path == "" {

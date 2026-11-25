@@ -114,11 +114,7 @@ func PrintHelp(text string, w io.Writer) {
 			_, _ = fmt.Fprintln(out, Bold("Usage:")+line[6:])
 			continue
 		}
-		if strings.HasPrefix(line, "Scope:") {
-			_, _ = fmt.Fprintln(out, Bold("Scope:")+Dim(line[6:]))
-			continue
-		}
-		if strings.HasPrefix(line, "For details") {
+		if strings.HasPrefix(line, "Setup installs") || strings.HasPrefix(line, "For details") {
 			_, _ = fmt.Fprintln(out, Dim(line))
 			continue
 		}

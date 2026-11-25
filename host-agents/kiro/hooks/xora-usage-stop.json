@@ -12,11 +12,11 @@
     },
     {
       "name": "Xora DLC usage SessionEnd",
-      "description": "Flush pending usage queue when CLI V3 session ends.",
+      "description": "Report the session's last turn and flush pending usage when CLI V3 session ends.",
       "trigger": "SessionEnd",
       "action": {
         "type": "command",
-        "command": "xdlc usage --hook kiro --flush"
+        "command": "xdlc usage --hook kiro"
       }
     },
     {

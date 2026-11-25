@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "xdlc usage --hook claude --flush",
+            "command": "xdlc usage --hook claude",
             "timeout": 30
           }
         ]

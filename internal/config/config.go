@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	Version  = "0.3.3"
+	Version  = "0.4.0"
 	Repo     = "TechX-Corp/xoradlc-plugin"
 	ProdURL  = "https://xoradlc-platform-api.techxcorp.com"
 	ClientID = "xora-plugin"
@@ -20,8 +20,12 @@ var (
 		"kiro":   "Kiro CLI",
 		"claude": "Claude Code",
 	}
-	Scopes    = []string{"global", "local"}
-	ScopeName = map[string]string{"global": "Global", "local": "Local"}
+)
+
+const (
+	ScopeLocal = "local"
+	// ScopeGlobal only appears in installs.json written before 0.4.0; `xdlc update` removes those setups.
+	ScopeGlobal = "global"
 )
 
 func Home() string {

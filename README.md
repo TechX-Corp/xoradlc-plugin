@@ -9,8 +9,8 @@ This repository ships **Xora DLC** integration for coding agents (`xdlc` + role/
 | `roles/<id>/AGENTS.md` | Per-role instructions (installable only if `enabled: true`) |
 | `host-agents/<host>/` | Per-host pack: `manifest.yaml`, hook JSON, and Go adapters (parse transcript / agent email) |
 | `standards/MCP_ROUTING.md` | Shared MCP intent → tool routing (agent-facing) |
-| `host-agents/claude/hooks/` | Claude hook templates (SessionStart print + Stop/usage flush) |
-| `host-agents/kiro/hooks/` | Kiro CLI hook templates (Stop / SessionEnd / SessionStart usage flush) |
+| `host-agents/claude/hooks/` | Claude hook templates (SessionStart print; Stop / SubagentStop / SessionEnd report usage; SessionStart flushes the queue) |
+| `host-agents/kiro/hooks/` | Kiro CLI hook templates (Stop / SessionEnd report usage; SessionStart flushes the queue) |
 | `internal/usage/` | Shared queue + `POST /usage` pipeline (hook entrypoint; not listed in user help) |
 | `install.sh` / `install.ps1` | Per-OS installer for the `xdlc` binary |
 | `scripts/smoke_xdlc.py` | Stdlib smoke test against the built binary (fake local backend only) |
@@ -22,10 +22,11 @@ User-facing install and commands: **[USER_GUIDE.md](USER_GUIDE.md)**.
 
 - One MCP server name: **`xora-dlc`**. Role comes from the logged-in account (AAP), not from per-role MCP names.
 - `xdlc setup` requires login; account role must be enabled in `roles/catalog.yaml`.
+- Setups are per project only (cwd, never `$HOME`, where the agents keep machine-wide config); global setups from before 0.4.0 are removed by `xdlc update`.
 - Host differences are declared in `manifest.yaml` (Kiro vs Claude paths). Claude does not need a marketplace for MCP / skills / hooks.
 - IDE `SKILL.md` files may be hydrated at setup from an AAP allowlist (NL JSON); runtime calls go through `xora_ask`.
 - Bundle on disk after install/update: `~/.xdlc/plugin/` (or `XDLC_PLUGIN_DIR` for local clones).
-- **AI usage (metering):** after setup, host hooks report Claude/Kiro turns to Xora DLC `POST /usage` (tokens / credits, optional agent account email). Convention gov alerts stay on `xdlc sensor report` → `POST /governance/sensor-events`. The hook entrypoint is not part of the user-facing command list in `USER_GUIDE.md`.
+- **AI usage (metering):** after setup, host hooks report Claude/Kiro turns to Xora DLC `POST /usage` (tokens / credits, optional agent account email). Kiro V3 writes a turn's `usage_summary` only after its Stop hooks return, so the Kiro Stop hook hands the report to a detached `xdlc usage --deferred` child; SessionEnd also parses, so a session's last turn is sent. Failed sends wait in `~/.xdlc/usage-pending.jsonl` (30-day TTL). Convention gov alerts stay on `xdlc sensor report` → `POST /governance/sensor-events`. The hook entrypoint is not part of the user-facing command list in `USER_GUIDE.md`.
 
 ## Checks
 

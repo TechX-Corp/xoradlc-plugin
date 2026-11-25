@@ -35,7 +35,7 @@ func printSetupView(r installs.Record, cwd string) {
 	}
 	fmt.Printf("%s %s\n", tui.Bold("Setup ID:"), tui.Em(r.ID))
 	fmt.Printf("%s %s\n", tui.Bold("Agent:"), tui.Em(agent))
-	fmt.Printf("%s %s\n", tui.Bold("Scope:"), setupScopeInline(r, cwd))
+	fmt.Printf("%s %s\n", tui.Bold("Project:"), strings.ReplaceAll(setupProjectCell(r, cwd), "\n", " · "))
 	updated := tui.Dim("unknown")
 	if r.UpdatedAt > 0 {
 		updated = time.Unix(r.UpdatedAt, 0).Format("2006-01-02 15:04")
@@ -45,25 +45,7 @@ func printSetupView(r installs.Record, cwd string) {
 	fmt.Printf("%s %s\n", tui.Bold("Work order:"), workOrderViewLine(r))
 }
 
-func setupScopeInline(r installs.Record, cwd string) string {
-	scope := config.ScopeName[r.Scope]
-	if scope == "" {
-		scope = r.Scope
-	}
-	if r.Scope == "global" {
-		return scope + " · " + tui.Dim("all repositories on this machine")
-	}
-	line2 := setupScopeCell(r, cwd)
-	if i := strings.IndexByte(line2, '\n'); i >= 0 {
-		line2 = line2[i+1:]
-	}
-	return scope + " · " + line2
-}
-
 func repoViewLine(r installs.Record) string {
-	if r.Scope == "global" {
-		return tui.Dim("not a repo")
-	}
 	root := gitx.GitRoot(r.Path)
 	if root == "" {
 		return tui.Dim("not a git repository")
@@ -77,9 +59,6 @@ func repoViewLine(r installs.Record) string {
 }
 
 func workOrderViewLine(r installs.Record) string {
-	if r.Scope == "global" {
-		return tui.Dim("map in repo: ") + tui.Em("xdlc link -l")
-	}
 	root := gitx.GitRoot(r.Path)
 	if root == "" {
 		return tui.Dim("—")

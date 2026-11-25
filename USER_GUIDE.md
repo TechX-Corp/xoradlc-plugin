@@ -44,27 +44,21 @@ xdlc login
 
 **2. Install the pack for your agent**
 
-For the project you are in:
+Run it inside each project you work on (not in your home directory); git does not track `xdlc` files:
 
 ```bash
 cd ~/your-project
-xdlc setup --agent kiro --scope local
-```
-
-For every repo on this machine:
-
-```bash
-xdlc setup --agent kiro --scope global
+xdlc setup --agent kiro
 ```
 
 | Flag | Value | Meaning |
 |---|---|---|
 | `-a`, `--agent` | `kiro` | Kiro CLI |
 | | `claude` | Claude Code |
-| `-s`, `--scope` | `local` | Current project only; git does not track `xdlc` files |
-| | `global` | Every repo on this machine |
 
-Omit a flag and `xdlc` asks in the terminal (↑/↓, Enter). Open a **new** agent session after setup.
+Omit the flag and `xdlc` asks in the terminal (↑/↓, Enter). Open a **new** agent session after setup.
+
+Global setups (`--scope global`, before 0.4.0) are no longer supported: `xdlc update` removes them, keeping any file you edited and your own MCP servers. Run `xdlc setup` in each project instead.
 
 **Warning — agent routing:** setup installs MCP routing so the agent prefers MCP **`xora-dlc`** / tool **`xora_ask`** for Xora DLC intents. Other plugins may still win if their rules are stronger or you override.
 
@@ -83,7 +77,7 @@ xdlc link
 ## Commands
 
 ```text
-xdlc 0.3.3: Xora DLC for Claude Code and Kiro CLI
+xdlc 0.4.0: Xora DLC for Claude Code and Kiro CLI
 
 Usage: xdlc <command> [options]
 
@@ -103,11 +97,11 @@ Options:
   -h, --help     This command list
 
 Shortcuts (skip terminal prompts):
-  xdlc setup -a, --agent kiro|claude  -s, --scope global|local
+  xdlc setup -a, --agent kiro|claude
   xdlc remove -a, --agent kiro|claude
   xdlc link [WO-…] [-t, --step STEP] [-b, --branch BRANCH] [-l, --list]
 
-Scope: global = every repo on this machine; local = current project, git does not track xdlc files.
+Setup installs into the current project; git does not track xdlc files.
 For details on one command: xdlc <command> --help
 ```
 
@@ -119,6 +113,7 @@ For details on one command: xdlc <command> --help
 | Windows: `'xdlc' is not recognized` | Open a new terminal; check user `PATH` includes `%LOCALAPPDATA%\Programs\xdlc` |
 | PowerShell blocks the script | Use the install command above (`-ExecutionPolicy ByPass`) |
 | `could not download xdlc` / no release yet | Need a GitHub Release (`vX.Y.Z`) with a binary for your OS; check access to `github.com` |
+| `Current directory is your home … not a project` | `cd` into a project directory, then run `xdlc setup` again |
 | Menu does not move with ↑/↓ | Use Windows Terminal, or select by number (see [Notes](#notes)) |
 
 ## Notes

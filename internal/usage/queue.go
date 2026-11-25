@@ -45,8 +45,38 @@ func Enqueue(recs []Record) error {
 
 // LoadPending reads the queue, drops expired lines (TTL), returns live records.
 func LoadPending() ([]Record, error) {
-	path := queuePath()
-	f, err := os.Open(path)
+	rows, readErr := readQueue()
+	if rows == nil {
+		return nil, readErr
+	}
+	cutoff := time.Now().UTC().Add(-ttlDays * 24 * time.Hour)
+	var keep []Queued
+	var out []Record
+	for _, q := range rows {
+		if q.QueuedAt.IsZero() {
+			q.QueuedAt = time.Now().UTC()
+		}
+		if q.QueuedAt.Before(cutoff) {
+			fmt.Fprintf(os.Stderr, "xdlc usage: dropped expired turn %s (queued %s)\n", q.TurnID, q.QueuedAt.Format(time.RFC3339))
+			continue
+		}
+		keep = append(keep, q)
+		out = append(out, q.Record)
+	}
+	if readErr != nil {
+		return out, readErr
+	}
+	// Rewrite file without expired rows.
+	if err := rewriteQueue(keep); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// readQueue returns the queue rows (nil when there is no queue) and closes the file before
+// returning: Windows cannot rename the rewritten queue over a file that is still open.
+func readQueue() ([]Queued, error) {
+	f, err := os.Open(queuePath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -54,10 +84,7 @@ func LoadPending() ([]Record, error) {
 		return nil, err
 	}
 	defer f.Close()
-
-	cutoff := time.Now().UTC().Add(-ttlDays * 24 * time.Hour)
-	var keep []Queued
-	var out []Record
+	rows := []Queued{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -69,24 +96,9 @@ func LoadPending() ([]Record, error) {
 		if err := json.Unmarshal(line, &q); err != nil {
 			continue
 		}
-		if q.QueuedAt.IsZero() {
-			q.QueuedAt = time.Now().UTC()
-		}
-		if q.QueuedAt.Before(cutoff) {
-			fmt.Fprintf(os.Stderr, "xdlc usage: dropped expired turn %s (queued %s)\n", q.TurnID, q.QueuedAt.Format(time.RFC3339))
-			continue
-		}
-		keep = append(keep, q)
-		out = append(out, q.Record)
+		rows = append(rows, q)
 	}
-	if err := sc.Err(); err != nil {
-		return out, err
-	}
-	// Rewrite file without expired rows.
-	if err := rewriteQueue(keep); err != nil {
-		return out, err
-	}
-	return out, nil
+	return rows, sc.Err()
 }
 
 func rewriteQueue(rows []Queued) error {
@@ -124,27 +136,12 @@ func AckRemoves(sent []Record) error {
 	for _, r := range sent {
 		done[r.Tool+"|"+r.TurnID] = struct{}{}
 	}
-	path := queuePath()
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	rows, err := readQueue()
+	if err != nil || rows == nil {
 		return err
 	}
-	defer f.Close()
 	var keep []Queued
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var q Queued
-		if err := json.Unmarshal(line, &q); err != nil {
-			continue
-		}
+	for _, q := range rows {
 		key := q.Tool + "|" + q.TurnID
 		if _, ok := done[key]; ok {
 			continue

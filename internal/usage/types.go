@@ -21,6 +21,7 @@ type Record struct {
 	CacheWriteTokens   int64      `json:"cache_write_tokens"`
 	Credits            *float64   `json:"credits"`
 	AgentAccountEmail  *string    `json:"agent_account_email"`
+	WorkOrderID        *string    `json:"work_order_id,omitempty"` // WO code from `xdlc link`
 	OccurredAt         time.Time  `json:"occurred_at"`
 }
 

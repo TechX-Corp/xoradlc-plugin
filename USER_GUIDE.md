@@ -77,7 +77,7 @@ xdlc link
 ## Commands
 
 ```text
-xdlc 0.4.0: Xora DLC for Claude Code and Kiro CLI
+xdlc 0.5.0: Xora DLC for Claude Code and Kiro CLI
 
 Usage: xdlc <command> [options]
 

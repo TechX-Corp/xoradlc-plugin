@@ -61,6 +61,9 @@ func Report(h Host, payload HookPayload, flushOnly bool) error {
 			}
 		}
 	}
+	if len(fresh) > 0 {
+		applyWorkOrder(fresh, workOrderFor(payload.Cwd))
+	}
 
 	all := append(pending, fresh...)
 	all = dedupe(all)

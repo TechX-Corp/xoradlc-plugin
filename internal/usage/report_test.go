@@ -1,8 +1,13 @@
 package usage
 
 import (
+	"os"
+	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/TechX-Corp/xoradlc-plugin/internal/gitx"
+	"github.com/TechX-Corp/xoradlc-plugin/internal/link"
 )
 
 func TestHookPlan(t *testing.T) {
@@ -66,5 +71,39 @@ func TestReportWhenSettledWaitsForTheLateSummary(t *testing.T) {
 	}
 	if h.calls != 3 { // two polls until the summary shows up, then Report's own parse
 		t.Fatalf("ParseNew calls = %d", h.calls)
+	}
+}
+
+func TestReportStampsTheWorkOrderOfTheLinkedBranch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "feat/x"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	repoID, _ := gitx.RepoIdentity(gitx.GitRoot(repo))
+	if err := link.SaveLink(repoID, "feat/x", map[string]string{"work_order_id": "WO-2026-031", "step_id": "impl"}); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &lateHost{calls: 1}
+	if err := Report(h, HookPayload{HookEventName: "Stop", SessionID: "s1", Cwd: repo}, false); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := LoadPending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].WorkOrderID == nil || *pending[0].WorkOrderID != "WO-2026-031" {
+		t.Fatalf("pending = %+v", pending)
+	}
+	if wo := workOrderFor(t.TempDir()); wo != nil { // not a repo: no WO
+		t.Fatalf("workOrderFor(non-repo) = %q", *wo)
 	}
 }
